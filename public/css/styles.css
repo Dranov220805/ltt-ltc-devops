@@ -1,0 +1,7 @@
+body { background: #f8f9fa; }
+.table { background: #fff; }
+.modal .form-label { font-weight: 600; }
+
+@media (min-width: 768px) {
+  .modal-dialog { max-width: 540px; }
+}
