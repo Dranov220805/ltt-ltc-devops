@@ -1,32 +1,48 @@
 name: Build and Test
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 20
+  APP_DIR: .
 
 jobs:
-  build:
-    name: Build Application
+  build-and-test:
+    name: Lint and Test
     runs-on: ubuntu-latest
-    
+
+    defaults:
+      run:
+        working-directory: ${{ env.APP_DIR }}
+
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Match the Node.js version used in the project
-          cache: 'npm'
-          
-      - name: Install Dependencies
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
         run: npm ci
-        
-      - name: Build Source Code
-        run: npm run build
-        
-      # TODO: add Jest/unit tests
-      # - name: Run Tests
-      #   run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
