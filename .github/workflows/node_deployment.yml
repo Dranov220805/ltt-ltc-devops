@@ -245,11 +245,14 @@ jobs:
             fi
             echo "Kubernetes API auth check for cluster ${cluster} (STS ARN: ${caller})"
             echo "IAM role ARN used for EKS access entries: ${iam_role_arn:-cannot parse - expected assumed-role/ROLE/session}"
-            for i in $(seq 1 12); do
-              if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+            for i in $(seq 1 18); do
+              if kubectl get ns --request-timeout=45s >/dev/null 2>&1 \
+                && sleep 3 \
+                && kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+                echo "Kubernetes API authentication OK (cluster ${cluster}, verified twice)."
                 return 0
               fi
-              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/12)..."
+              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/18)..."
               sleep 10
             done
             echo "--- describe-cluster accessConfig (must allow API access entries; not CONFIG_MAP-only) ---"
@@ -282,8 +285,13 @@ jobs:
               echo "Starting wave $((((COUNTER - 1) / WAVE_SIZE) + 1))"
             fi
             echo "Deploying to blue cluster: ${CLUSTER}"
+            export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
             aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             verify_eks_kubectl_auth "${CLUSTER}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
+            echo "Pre-Helm: $(kubectl config current-context)"
+            aws sts get-caller-identity
+            kubectl get ns --request-timeout=45s
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
@@ -366,11 +374,14 @@ jobs:
             fi
             echo "Kubernetes API auth check for cluster ${cluster} (STS ARN: ${caller})"
             echo "IAM role ARN used for EKS access entries: ${iam_role_arn:-cannot parse - expected assumed-role/ROLE/session}"
-            for i in $(seq 1 12); do
-              if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+            for i in $(seq 1 18); do
+              if kubectl get ns --request-timeout=45s >/dev/null 2>&1 \
+                && sleep 3 \
+                && kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+                echo "Kubernetes API authentication OK (cluster ${cluster}, verified twice)."
                 return 0
               fi
-              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/12)..."
+              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/18)..."
               sleep 10
             done
             echo "--- describe-cluster accessConfig (must allow API access entries; not CONFIG_MAP-only) ---"
@@ -415,8 +426,13 @@ jobs:
               echo "Starting wave $((((COUNTER - 1) / WAVE_SIZE) + 1))"
             fi
             echo "Deploying to green cluster: ${CLUSTER}"
+            export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
             aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             verify_eks_kubectl_auth "${CLUSTER}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
+            echo "Pre-Helm: $(kubectl config current-context)"
+            aws sts get-caller-identity
+            kubectl get ns --request-timeout=45s
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
