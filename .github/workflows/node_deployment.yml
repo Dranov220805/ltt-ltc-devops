@@ -32,6 +32,13 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
+  # Defaults match this repo’s Helm chart (helm/app, release api → Deployment api-app)
+  HELM_CHART_PATH: ${{ vars.HELM_CHART_PATH || 'helm/app' }}
+  HELM_RELEASE_NAME: ${{ vars.HELM_RELEASE_NAME || 'api' }}
+  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'default' }}
+  K8S_DEPLOYMENT_NAME: ${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}
+  HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+  HELM_INSTALL_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
 
 jobs:
   ci-gates:
@@ -51,9 +58,9 @@ jobs:
         with:
           version: v3.14.4
       - name: Helm lint
-        run: helm lint "${{ vars.HELM_CHART_PATH }}"
+        run: helm lint "${HELM_CHART_PATH}"
       - name: Helm template render
-        run: helm template "${{ vars.HELM_RELEASE_NAME }}" "${{ vars.HELM_CHART_PATH }}" --namespace "${{ vars.K8S_NAMESPACE }}" > rendered-manifests.yaml
+        run: helm template "${HELM_RELEASE_NAME}" "${HELM_CHART_PATH}" --namespace "${K8S_NAMESPACE}" > rendered-manifests.yaml
       - name: Upload rendered manifests
         uses: actions/upload-artifact@v4
         with:
@@ -129,11 +136,11 @@ jobs:
     env:
       IMG_REPO: ${{ needs.build-and-push.outputs.image_repo }}
       IMG_TAG: ${{ needs.build-and-push.outputs.image_tag }}
-      RELEASE: ${{ vars.HELM_RELEASE_NAME }}
-      CHART: ${{ vars.HELM_CHART_PATH }}
-      NS: ${{ vars.K8S_NAMESPACE }}
-      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
-      HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT }}
+      RELEASE: ${{ env.HELM_RELEASE_NAME }}
+      CHART: ${{ env.HELM_CHART_PATH }}
+      NS: ${{ env.K8S_NAMESPACE }}
+      VALUES_FILE: ${{ env.HELM_VALUES_FILE }}
+      HELM_TIMEOUT: ${{ env.HELM_INSTALL_TIMEOUT }}
       BLUE_CLUSTERS: ${{ vars.EKS_BLUE_CLUSTERS }}
       DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
       CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
@@ -188,7 +195,7 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             "${CMD[@]}"
-            kubectl rollout status deployment/${{ vars.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
+            kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
           done
       - name: Blue deployment summary
@@ -227,11 +234,11 @@ jobs:
     env:
       IMG_REPO: ${{ needs.build-and-push.outputs.image_repo }}
       IMG_TAG: ${{ needs.build-and-push.outputs.image_tag }}
-      RELEASE: ${{ vars.HELM_RELEASE_NAME }}
-      CHART: ${{ vars.HELM_CHART_PATH }}
-      NS: ${{ vars.K8S_NAMESPACE }}
-      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
-      HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT }}
+      RELEASE: ${{ env.HELM_RELEASE_NAME }}
+      CHART: ${{ env.HELM_CHART_PATH }}
+      NS: ${{ env.K8S_NAMESPACE }}
+      VALUES_FILE: ${{ env.HELM_VALUES_FILE }}
+      HELM_TIMEOUT: ${{ env.HELM_INSTALL_TIMEOUT }}
       GREEN_CLUSTERS: ${{ vars.EKS_GREEN_CLUSTERS }}
       DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
       CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
@@ -288,7 +295,7 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             "${CMD[@]}"
-            kubectl rollout status deployment/${{ vars.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
+            kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
             DEPLOYED="${DEPLOYED},${CLUSTER}"
           done
