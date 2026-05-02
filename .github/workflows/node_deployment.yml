@@ -32,6 +32,8 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  # AWS_ROLE_TO_ASSUME must be the IAM role ARN: arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME
+  # Put OIDC trust conditions (token.actions.githubusercontent.com:sub, repo:...) in IAM only — not in this variable.
   # Defaults match this repo’s Helm chart (helm/app, release api → Deployment api-app).
   # Use workflow env only (don’t reference env.* inside job-level env — it resolves empty).
   HELM_CHART_PATH: ${{ vars.HELM_CHART_PATH || 'helm/app' }}
@@ -40,6 +42,9 @@ env:
   K8S_DEPLOYMENT_NAME: ${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}
   HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
   HELM_INSTALL_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
+  # Must match an existing ECR repository in your account (create in AWS if missing).
+  # GitHub Variables treat whitespace-only values as truthy for || ; normalization happens in validate-aws / compute artifact metadata.
+  ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME != '' && vars.ECR_REPOSITORY_NAME || 'ltt-ltc-devops' }}
 
 jobs:
   ci-gates:
@@ -68,10 +73,42 @@ jobs:
           name: rendered-manifests
           path: rendered-manifests.yaml
 
+  validate-aws:
+    name: Validate AWS deploy configuration
+    runs-on: ubuntu-latest
+    needs: helm-validate
+    steps:
+      - name: Ensure AWS_ROLE_TO_ASSUME is an IAM role ARN
+        env:
+          ROLE: ${{ vars.AWS_ROLE_TO_ASSUME }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ROLE// /}" ]]; then
+            echo "::error::Repository variable AWS_ROLE_TO_ASSUME is empty. Set it to arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME"
+            exit 1
+          fi
+          if [[ ! "${ROLE}" =~ ^arn:aws:iam::[0-9]{12}:role/ ]]; then
+            echo "::error::AWS_ROLE_TO_ASSUME must be the full IAM role ARN, e.g. arn:aws:iam::123456789012:role/GitHubOIDCDeploy"
+            echo "Do not paste trust-policy lines like token.actions.githubusercontent.com or repo:ORG/REPO — those belong in the role trust policy in AWS IAM."
+            echo "Received (truncated): ${ROLE:0:120}"
+            exit 1
+          fi
+      - name: Resolve ECR repository name for Docker tags
+        env:
+          REPO_RAW: ${{ vars.ECR_REPOSITORY_NAME }}
+          REPO_WORKFLOW: ${{ env.ECR_REPOSITORY_NAME }}
+        run: |
+          set -euo pipefail
+          trim() { printf '%s' "${1:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          REPO="$(trim "${REPO_RAW:-}")"
+          if [[ -z "$REPO" ]]; then REPO="$(trim "${REPO_WORKFLOW:-}")"; fi
+          if [[ -z "$REPO" ]]; then REPO="ltt-ltc-devops"; fi
+          echo "Effective ECR_REPOSITORY_NAME for images: ${REPO}"
+
   build-and-push:
     name: Build and push artifact
     runs-on: ubuntu-latest
-    needs: helm-validate
+    needs: validate-aws
     outputs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       image_repo: ${{ steps.meta.outputs.image_repo }}
@@ -97,12 +134,25 @@ jobs:
       - name: Compute artifact metadata
         id: meta
         shell: bash
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO_RAW: ${{ vars.ECR_REPOSITORY_NAME }}
+          REPO_WORKFLOW: ${{ env.ECR_REPOSITORY_NAME }}
         run: |
           set -euo pipefail
+          trim() { printf '%s' "${1:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          REGISTRY="${REGISTRY%/}"
+          REPO="$(trim "${REPO_RAW:-}")"
+          if [[ -z "$REPO" ]]; then REPO="$(trim "${REPO_WORKFLOW:-}")"; fi
+          if [[ -z "$REPO" ]]; then REPO="ltt-ltc-devops"; fi
+          if [[ -z "${REGISTRY:-}" ]]; then
+            echo "::error::Amazon ECR login did not produce a registry URI (steps.ecr.outputs.registry). Multi-registry login leaves registry unset — use a single registry or set inputs on aws-actions/amazon-ecr-login@v2."
+            exit 1
+          fi
           CUSTOM_TAG="${{ github.event.inputs.image_tag }}"
           SHA_TAG="${GITHUB_SHA::12}"
           TAG="${CUSTOM_TAG:-$SHA_TAG}"
-          IMAGE_REPO="${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY_NAME }}"
+          IMAGE_REPO="${REGISTRY}/${REPO}"
           echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
           echo "image=${IMAGE_REPO}:${TAG}" >> "$GITHUB_OUTPUT"
