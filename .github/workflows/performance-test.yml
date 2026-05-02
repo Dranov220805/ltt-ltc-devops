@@ -1,0 +1,32 @@
+name: Gatling Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_base_url:
+        description: "Base URL under test"
+        required: true
+        default: "https://api.ltt-ltc.io.vn"
+
+jobs:
+  gatling:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        users: [10, 100, 1000]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Gatling simulation
+        run: |
+          docker run --rm \
+            -v "${PWD}/performance/gatling:/opt/gatling/user-files" \
+            -v "${PWD}/performance/reports:/opt/gatling/results" \
+            -e JAVA_OPTS="-DbaseUrl=${{ github.event.inputs.target_base_url }} -Dusers=${{ matrix.users }}" \
+            denvazh/gatling:3.11.2 \
+            -s simulations.SeatReservationSimulation
+      - name: Upload Gatling report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gatling-report-${{ matrix.users }}-users
+          path: performance/reports

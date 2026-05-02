@@ -1,0 +1,318 @@
+name: Application CI/CD (EKS + Helm Blue-Green)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional immutable image tag (default: short SHA)"
+        required: false
+        default: ""
+      stabilization_minutes:
+        description: "Bake time after blue deployment before green"
+        required: false
+        default: "20"
+      deployment_strategy:
+        description: "Deployment strategy: bluegreen or canary"
+        required: false
+        default: "bluegreen"
+      cluster_wave_size:
+        description: "How many clusters to update per wave"
+        required: false
+        default: "1"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: app-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  ci-gates:
+    uses: ./.github/workflows/reusable-ci.yml
+    secrets: inherit
+
+  helm-validate:
+    name: Helm lint and template validation
+    runs-on: ubuntu-latest
+    needs: ci-gates
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+      - name: Helm lint
+        run: helm lint "${{ vars.HELM_CHART_PATH }}"
+      - name: Helm template render
+        run: helm template "${{ vars.HELM_RELEASE_NAME }}" "${{ vars.HELM_CHART_PATH }}" --namespace "${{ vars.K8S_NAMESPACE }}" > rendered-manifests.yaml
+      - name: Upload rendered manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-manifests
+          path: rendered-manifests.yaml
+
+  build-and-push:
+    name: Build and push artifact
+    runs-on: ubuntu-latest
+    needs: helm-validate
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_repo: ${{ steps.meta.outputs.image_repo }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+      - name: Install dependencies and validate build
+        run: |
+          npm ci
+          npm run build
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Compute artifact metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          CUSTOM_TAG="${{ github.event.inputs.image_tag }}"
+          SHA_TAG="${GITHUB_SHA::12}"
+          TAG="${CUSTOM_TAG:-$SHA_TAG}"
+          IMAGE_REPO="${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY_NAME }}"
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE_REPO}:${TAG}" >> "$GITHUB_OUTPUT"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.image_repo }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.run_id }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Publish artifact summary
+        run: |
+          {
+            echo "## Build Artifact"
+            echo "- Image: ${{ steps.meta.outputs.image }}"
+            echo "- Immutable tag: ${{ steps.meta.outputs.image_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-blue:
+    name: Deploy blue cluster set
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    env:
+      IMG_REPO: ${{ needs.build-and-push.outputs.image_repo }}
+      IMG_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+      RELEASE: ${{ vars.HELM_RELEASE_NAME }}
+      CHART: ${{ vars.HELM_CHART_PATH }}
+      NS: ${{ vars.K8S_NAMESPACE }}
+      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+      HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT }}
+      BLUE_CLUSTERS: ${{ vars.EKS_BLUE_CLUSTERS }}
+      DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
+      CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.31.0
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+      - name: Validate required variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          for V in RELEASE CHART NS BLUE_CLUSTERS; do
+            if [ -z "${!V}" ]; then
+              echo "Missing variable: ${V}" >&2
+              exit 1
+            fi
+          done
+      - name: Deploy image to blue clusters
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMO="${HELM_TIMEOUT:-20m}"
+          IFS=',' read -r -a CLUSTERS <<< "${BLUE_CLUSTERS}"
+          WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
+          if ! [[ "${WAVE_SIZE}" =~ ^[0-9]+$ ]] || [ "${WAVE_SIZE}" -lt 1 ]; then
+            echo "Invalid cluster wave size: ${WAVE_SIZE}" >&2
+            exit 1
+          fi
+          COUNTER=0
+          for RAW in "${CLUSTERS[@]}"; do
+            CLUSTER="$(echo "${RAW}" | xargs)"
+            [ -z "${CLUSTER}" ] && continue
+            COUNTER=$((COUNTER + 1))
+            if [ $(((COUNTER - 1) % WAVE_SIZE)) -eq 0 ]; then
+              echo "Starting wave $((((COUNTER - 1) / WAVE_SIZE) + 1))"
+            fi
+            echo "Deploying to blue cluster: ${CLUSTER}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
+            CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
+            if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
+              CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
+            fi
+            if [ -n "${VALUES_FILE}" ] && [ -f "${VALUES_FILE}" ]; then
+              CMD+=(-f "${VALUES_FILE}")
+            fi
+            "${CMD[@]}"
+            kubectl rollout status deployment/${{ vars.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
+            kubectl get hpa -n "${NS}" -o wide || true
+          done
+      - name: Blue deployment summary
+        run: |
+          {
+            echo "## Blue deployment"
+            echo "- Clusters: ${{ vars.EKS_BLUE_CLUSTERS }}"
+            echo "- Image: ${IMG_REPO}:${IMG_TAG}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  stabilize-blue:
+    name: Stabilize blue before green
+    needs: deploy-blue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait stabilization window
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="${{ github.event.inputs.stabilization_minutes }}"
+          if [ -z "${M}" ]; then
+            M=20
+          fi
+          if [ "${M}" -gt 0 ]; then
+            echo "Waiting ${M} minutes."
+            sleep $((M * 60))
+          fi
+
+  deploy-green:
+    name: Deploy green cluster set
+    needs:
+      - build-and-push
+      - stabilize-blue
+    if: ${{ vars.EKS_GREEN_CLUSTERS != '' }}
+    runs-on: ubuntu-latest
+    env:
+      IMG_REPO: ${{ needs.build-and-push.outputs.image_repo }}
+      IMG_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+      RELEASE: ${{ vars.HELM_RELEASE_NAME }}
+      CHART: ${{ vars.HELM_CHART_PATH }}
+      NS: ${{ vars.K8S_NAMESPACE }}
+      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+      HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT }}
+      GREEN_CLUSTERS: ${{ vars.EKS_GREEN_CLUSTERS }}
+      DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
+      CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.31.0
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+      - name: Deploy image to green clusters with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMO="${HELM_TIMEOUT:-20m}"
+          IFS=',' read -r -a CLUSTERS <<< "${GREEN_CLUSTERS}"
+          WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
+          if ! [[ "${WAVE_SIZE}" =~ ^[0-9]+$ ]] || [ "${WAVE_SIZE}" -lt 1 ]; then
+            echo "Invalid cluster wave size: ${WAVE_SIZE}" >&2
+            exit 1
+          fi
+          DEPLOYED=""
+          COUNTER=0
+          rollback() {
+            IFS=',' read -r -a DONE <<< "${DEPLOYED}"
+            for RAW in "${DONE[@]}"; do
+              C="$(echo "${RAW}" | xargs)"
+              [ -z "${C}" ] && continue
+              echo "Rollback on green cluster: ${C}"
+              aws eks update-kubeconfig --name "${C}" --region "${AWS_REGION}"
+              helm rollback "${RELEASE}" -n "${NS}" --wait --timeout "${TMO}" || true
+            done
+          }
+          trap rollback ERR
+          for RAW in "${CLUSTERS[@]}"; do
+            CLUSTER="$(echo "${RAW}" | xargs)"
+            [ -z "${CLUSTER}" ] && continue
+            COUNTER=$((COUNTER + 1))
+            if [ $(((COUNTER - 1) % WAVE_SIZE)) -eq 0 ]; then
+              echo "Starting wave $((((COUNTER - 1) / WAVE_SIZE) + 1))"
+            fi
+            echo "Deploying to green cluster: ${CLUSTER}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
+            CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
+            if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
+              CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
+            fi
+            if [ -n "${VALUES_FILE}" ] && [ -f "${VALUES_FILE}" ]; then
+              CMD+=(-f "${VALUES_FILE}")
+            fi
+            "${CMD[@]}"
+            kubectl rollout status deployment/${{ vars.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
+            kubectl get hpa -n "${NS}" -o wide || true
+            DEPLOYED="${DEPLOYED},${CLUSTER}"
+          done
+      - name: Green deployment summary
+        run: |
+          {
+            echo "## Green deployment"
+            echo "- Clusters: ${{ vars.EKS_GREEN_CLUSTERS }}"
+            echo "- Image: ${IMG_REPO}:${IMG_TAG}"
+            echo "- Rollback: automatic rollback executed on already-deployed green clusters when a failure occurs."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  observability-hooks:
+    name: Deployment observability hooks
+    needs:
+      - deploy-blue
+      - deploy-green
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment telemetry summary
+        run: |
+          {
+            echo "## Observability Hooks"
+            echo "- Blue result: ${{ needs.deploy-blue.result }}"
+            echo "- Green result: ${{ needs.deploy-green.result }}"
+            echo "- Suggested metrics window: 24-48 hours after deployment"
+            echo "- Track: CPU, memory, pod restarts, HPA desired/current replicas, request latency"
+            echo "- Log source: CloudWatch or ELK ingestion status per cluster"
+          } >> "$GITHUB_STEP_SUMMARY"

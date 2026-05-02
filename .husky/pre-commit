@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -e
+
+# Fail fast on malformed staged content (merge markers, whitespace errors).
+git diff --cached --check
+
+npx lint-staged
+npm run test:ci

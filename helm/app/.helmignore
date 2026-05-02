@@ -1,0 +1,4 @@
+# Patterns to ignore when packaging with `helm package`
+.DS_Store
+.git
+*.tgz

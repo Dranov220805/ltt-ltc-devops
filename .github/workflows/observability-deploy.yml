@@ -1,0 +1,54 @@
+name: Deploy Observability Stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: "Target EKS cluster name"
+        required: true
+      namespace:
+        description: "Namespace for observability components"
+        required: false
+        default: "monitoring"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  deploy-observability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Configure kubeconfig
+        run: aws eks update-kubeconfig --name "${{ github.event.inputs.cluster_name }}" --region "${AWS_REGION}"
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+      - name: Deploy kube-prometheus-stack
+        run: |
+          helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+            --namespace "${{ github.event.inputs.namespace }}" \
+            --create-namespace \
+            --wait --timeout 20m
+
+      - name: Deploy Loki stack
+        run: |
+          helm upgrade --install loki grafana/loki-stack \
+            --namespace "${{ github.event.inputs.namespace }}" \
+            --set promtail.enabled=true \
+            --wait --timeout 20m
