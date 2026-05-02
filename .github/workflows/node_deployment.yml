@@ -237,7 +237,7 @@ jobs:
           export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
           verify_eks_kubectl_auth() {
             local cluster="$1"
-            local caller i iam_role_arn
+            local caller iam_role_arn token endpoint
             caller="$(aws sts get-caller-identity --query Arn --output text)"
             iam_role_arn=""
             if [[ "${caller}" =~ ^arn:aws:sts::([0-9]+):assumed-role/([^/]+)/ ]]; then
@@ -245,16 +245,24 @@ jobs:
             fi
             echo "Kubernetes API auth check for cluster ${cluster} (STS ARN: ${caller})"
             echo "IAM role ARN used for EKS access entries: ${iam_role_arn:-cannot parse - expected assumed-role/ROLE/session}"
-            for i in $(seq 1 18); do
-              if kubectl get ns --request-timeout=45s >/dev/null 2>&1 \
-                && sleep 3 \
-                && kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
-                echo "Kubernetes API authentication OK (cluster ${cluster}, verified twice)."
-                return 0
-              fi
-              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/18)..."
-              sleep 10
-            done
+            export PATH="${PATH}:/usr/local/bin"
+            which aws
+            aws --version
+            rm -rf "${HOME}/.kube"
+            mkdir -p "${HOME}/.kube"
+            export KUBECONFIG="${HOME}/.kube/config"
+            export AWS_SDK_LOAD_CONFIG=1
+            aws eks update-kubeconfig --name "${cluster}" --region "${AWS_REGION}"
+            echo "===== KUBECONFIG (minified) ====="
+            kubectl config view --minify
+            echo "===== TOKEN TEST ====="
+            aws eks get-token --cluster-name "${cluster}" --region "${AWS_REGION}" >/tmp/eks-token.json
+            head -c 200 /tmp/eks-token.json || true
+            echo
+            if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+              echo "Kubernetes API authentication OK (cluster ${cluster})."
+              return 0
+            fi
             echo "--- describe-cluster accessConfig (must allow API access entries; not CONFIG_MAP-only) ---"
             aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.accessConfig' --output json 2>&1 || true
             echo "--- VPC endpoint reachability (GitHub runners need public API or allowed CIDR) ---"
@@ -264,6 +272,12 @@ jobs:
               aws eks describe-access-entry --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
               echo "--- list-associated-access-policies (need AmazonEKSClusterAdminPolicy or equivalent) ---"
               aws eks list-associated-access-policies --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
+            fi
+            token="$(aws eks get-token --cluster-name "${cluster}" --region "${AWS_REGION}" --query 'status.token' --output text 2>/dev/null || true)"
+            endpoint="$(aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.endpoint' --output text 2>/dev/null || true)"
+            if [[ -n "${token}" && -n "${endpoint}" ]]; then
+              echo "--- direct API probe with bearer token ---"
+              curl -k -H "Authorization: Bearer ${token}" "${endpoint}/api" || true
             fi
             echo "::error::Kubernetes API still rejects credentials for '${cluster}'. Apply terraform for aws_eks_access_entry + aws_eks_access_policy_association on role ${iam_role_arn:-UNKNOWN}. If cluster.authenticationMode is CONFIG_MAP only, update EKS to API_AND_CONFIG_MAP (see Terraform modules/eks access_config) then re-apply."
             kubectl get ns --request-timeout=45s || true
@@ -285,10 +299,7 @@ jobs:
               echo "Starting wave $((((COUNTER - 1) / WAVE_SIZE) + 1))"
             fi
             echo "Deploying to blue cluster: ${CLUSTER}"
-            export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             verify_eks_kubectl_auth "${CLUSTER}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             echo "Pre-Helm: $(kubectl config current-context)"
             aws sts get-caller-identity
             kubectl get ns --request-timeout=45s
@@ -366,7 +377,7 @@ jobs:
           export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
           verify_eks_kubectl_auth() {
             local cluster="$1"
-            local caller i iam_role_arn
+            local caller iam_role_arn token endpoint
             caller="$(aws sts get-caller-identity --query Arn --output text)"
             iam_role_arn=""
             if [[ "${caller}" =~ ^arn:aws:sts::([0-9]+):assumed-role/([^/]+)/ ]]; then
@@ -374,16 +385,24 @@ jobs:
             fi
             echo "Kubernetes API auth check for cluster ${cluster} (STS ARN: ${caller})"
             echo "IAM role ARN used for EKS access entries: ${iam_role_arn:-cannot parse - expected assumed-role/ROLE/session}"
-            for i in $(seq 1 18); do
-              if kubectl get ns --request-timeout=45s >/dev/null 2>&1 \
-                && sleep 3 \
-                && kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
-                echo "Kubernetes API authentication OK (cluster ${cluster}, verified twice)."
-                return 0
-              fi
-              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/18)..."
-              sleep 10
-            done
+            export PATH="${PATH}:/usr/local/bin"
+            which aws
+            aws --version
+            rm -rf "${HOME}/.kube"
+            mkdir -p "${HOME}/.kube"
+            export KUBECONFIG="${HOME}/.kube/config"
+            export AWS_SDK_LOAD_CONFIG=1
+            aws eks update-kubeconfig --name "${cluster}" --region "${AWS_REGION}"
+            echo "===== KUBECONFIG (minified) ====="
+            kubectl config view --minify
+            echo "===== TOKEN TEST ====="
+            aws eks get-token --cluster-name "${cluster}" --region "${AWS_REGION}" >/tmp/eks-token.json
+            head -c 200 /tmp/eks-token.json || true
+            echo
+            if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+              echo "Kubernetes API authentication OK (cluster ${cluster})."
+              return 0
+            fi
             echo "--- describe-cluster accessConfig (must allow API access entries; not CONFIG_MAP-only) ---"
             aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.accessConfig' --output json 2>&1 || true
             echo "--- VPC endpoint reachability (GitHub runners need public API or allowed CIDR) ---"
@@ -393,6 +412,12 @@ jobs:
               aws eks describe-access-entry --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
               echo "--- list-associated-access-policies (need AmazonEKSClusterAdminPolicy or equivalent) ---"
               aws eks list-associated-access-policies --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
+            fi
+            token="$(aws eks get-token --cluster-name "${cluster}" --region "${AWS_REGION}" --query 'status.token' --output text 2>/dev/null || true)"
+            endpoint="$(aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.endpoint' --output text 2>/dev/null || true)"
+            if [[ -n "${token}" && -n "${endpoint}" ]]; then
+              echo "--- direct API probe with bearer token ---"
+              curl -k -H "Authorization: Bearer ${token}" "${endpoint}/api" || true
             fi
             echo "::error::Kubernetes API still rejects credentials for '${cluster}'. Apply terraform for aws_eks_access_entry + aws_eks_access_policy_association on role ${iam_role_arn:-UNKNOWN}. If cluster.authenticationMode is CONFIG_MAP only, update EKS to API_AND_CONFIG_MAP (see Terraform modules/eks access_config) then re-apply."
             kubectl get ns --request-timeout=45s || true
@@ -413,6 +438,7 @@ jobs:
               C="$(echo "${RAW}" | xargs)"
               [ -z "${C}" ] && continue
               echo "Rollback on green cluster: ${C}"
+              export KUBECONFIG="${HOME}/.kube/config"
               aws eks update-kubeconfig --name "${C}" --region "${AWS_REGION}"
               helm rollback "${RELEASE}" -n "${NS}" --wait --timeout "${TMO}" || true
             done
@@ -426,10 +452,7 @@ jobs:
               echo "Starting wave $((((COUNTER - 1) / WAVE_SIZE) + 1))"
             fi
             echo "Deploying to green cluster: ${CLUSTER}"
-            export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             verify_eks_kubectl_auth "${CLUSTER}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             echo "Pre-Helm: $(kubectl config current-context)"
             aws sts get-caller-identity
             kubectl get ns --request-timeout=45s
