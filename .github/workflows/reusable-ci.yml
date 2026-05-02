@@ -11,6 +11,11 @@ on:
         required: false
         type: boolean
         default: true
+      run_sonar:
+        description: "SonarQube scan + quality gate (disable for deploy pipeline if rules block releases)"
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   quality:
@@ -51,6 +56,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Check SonarCloud configuration
+        if: ${{ inputs.run_sonar }}
         env:
           SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
@@ -60,6 +66,7 @@ jobs:
             exit 1
           fi
       - name: SonarQube Scan
+        if: ${{ inputs.run_sonar }}
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -68,6 +75,7 @@ jobs:
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
       - name: SonarQube Quality Gate
+        if: ${{ inputs.run_sonar }}
         uses: SonarSource/sonarqube-quality-gate-action@master
         timeout-minutes: 10
         env:

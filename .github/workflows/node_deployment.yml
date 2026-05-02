@@ -36,6 +36,9 @@ env:
 jobs:
   ci-gates:
     uses: ./.github/workflows/reusable-ci.yml
+    with:
+      # Deploy pipeline: skip Sonar (free tier / strict quality gate); PR CI still runs Sonar via nodejs.yml / build.yml
+      run_sonar: false
     secrets: inherit
 
   helm-validate:
