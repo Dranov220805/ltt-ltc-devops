@@ -237,9 +237,14 @@ jobs:
           export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
           verify_eks_kubectl_auth() {
             local cluster="$1"
-            local caller i
+            local caller i iam_role_arn
             caller="$(aws sts get-caller-identity --query Arn --output text)"
-            echo "Kubernetes API auth check for cluster ${cluster} (IAM principal: ${caller})"
+            iam_role_arn=""
+            if [[ "${caller}" =~ ^arn:aws:sts::([0-9]+):assumed-role/([^/]+)/ ]]; then
+              iam_role_arn="arn:aws:iam::${BASH_REMATCH[1]}:role/${BASH_REMATCH[2]}"
+            fi
+            echo "Kubernetes API auth check for cluster ${cluster} (STS ARN: ${caller})"
+            echo "IAM role ARN used for EKS access entries: ${iam_role_arn:-cannot parse - expected assumed-role/ROLE/session}"
             for i in $(seq 1 12); do
               if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
                 return 0
@@ -247,7 +252,17 @@ jobs:
               echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/12)..."
               sleep 10
             done
-            echo "::error::Cannot authenticate to the Kubernetes API for cluster '${cluster}'. IAM principal: ${caller}. Ensure terraform module github_actions is applied (aws_eks_access_entry + aws_eks_access_policy_association for this role), or create an EKS access entry in AWS Console for the same ARN as vars.AWS_ROLE_TO_ASSUME. Cluster endpoint must be reachable from GitHub-hosted runners (public endpoint or allowed CIDR)."
+            echo "--- describe-cluster accessConfig (must allow API access entries; not CONFIG_MAP-only) ---"
+            aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.accessConfig' --output json 2>&1 || true
+            echo "--- VPC endpoint reachability (GitHub runners need public API or allowed CIDR) ---"
+            aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.resourcesVpcConfig.{endpointPublicAccess:endpointPublicAccess,publicAccessCidrs:publicAccessCidrs}' --output json 2>&1 || true
+            if [[ -n "${iam_role_arn}" ]]; then
+              echo "--- describe-access-entry (404 = no entry for this role; terraform apply module github_actions) ---"
+              aws eks describe-access-entry --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
+              echo "--- list-associated-access-policies (need AmazonEKSClusterAdminPolicy or equivalent) ---"
+              aws eks list-associated-access-policies --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
+            fi
+            echo "::error::Kubernetes API still rejects credentials for '${cluster}'. Apply terraform for aws_eks_access_entry + aws_eks_access_policy_association on role ${iam_role_arn:-UNKNOWN}. If cluster.authenticationMode is CONFIG_MAP only, update EKS to API_AND_CONFIG_MAP (see Terraform modules/eks access_config) then re-apply."
             kubectl get ns --request-timeout=45s || true
             exit 1
           }
@@ -343,9 +358,14 @@ jobs:
           export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
           verify_eks_kubectl_auth() {
             local cluster="$1"
-            local caller i
+            local caller i iam_role_arn
             caller="$(aws sts get-caller-identity --query Arn --output text)"
-            echo "Kubernetes API auth check for cluster ${cluster} (IAM principal: ${caller})"
+            iam_role_arn=""
+            if [[ "${caller}" =~ ^arn:aws:sts::([0-9]+):assumed-role/([^/]+)/ ]]; then
+              iam_role_arn="arn:aws:iam::${BASH_REMATCH[1]}:role/${BASH_REMATCH[2]}"
+            fi
+            echo "Kubernetes API auth check for cluster ${cluster} (STS ARN: ${caller})"
+            echo "IAM role ARN used for EKS access entries: ${iam_role_arn:-cannot parse - expected assumed-role/ROLE/session}"
             for i in $(seq 1 12); do
               if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
                 return 0
@@ -353,7 +373,17 @@ jobs:
               echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/12)..."
               sleep 10
             done
-            echo "::error::Cannot authenticate to the Kubernetes API for cluster '${cluster}'. IAM principal: ${caller}. Ensure terraform module github_actions is applied (aws_eks_access_entry + aws_eks_access_policy_association for this role), or create an EKS access entry in AWS Console for the same ARN as vars.AWS_ROLE_TO_ASSUME. Cluster endpoint must be reachable from GitHub-hosted runners (public endpoint or allowed CIDR)."
+            echo "--- describe-cluster accessConfig (must allow API access entries; not CONFIG_MAP-only) ---"
+            aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.accessConfig' --output json 2>&1 || true
+            echo "--- VPC endpoint reachability (GitHub runners need public API or allowed CIDR) ---"
+            aws eks describe-cluster --name "${cluster}" --region "${AWS_REGION}" --query 'cluster.resourcesVpcConfig.{endpointPublicAccess:endpointPublicAccess,publicAccessCidrs:publicAccessCidrs}' --output json 2>&1 || true
+            if [[ -n "${iam_role_arn}" ]]; then
+              echo "--- describe-access-entry (404 = no entry for this role; terraform apply module github_actions) ---"
+              aws eks describe-access-entry --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
+              echo "--- list-associated-access-policies (need AmazonEKSClusterAdminPolicy or equivalent) ---"
+              aws eks list-associated-access-policies --cluster-name "${cluster}" --principal-arn "${iam_role_arn}" 2>&1 || true
+            fi
+            echo "::error::Kubernetes API still rejects credentials for '${cluster}'. Apply terraform for aws_eks_access_entry + aws_eks_access_policy_association on role ${iam_role_arn:-UNKNOWN}. If cluster.authenticationMode is CONFIG_MAP only, update EKS to API_AND_CONFIG_MAP (see Terraform modules/eks access_config) then re-apply."
             kubectl get ns --request-timeout=45s || true
             exit 1
           }
