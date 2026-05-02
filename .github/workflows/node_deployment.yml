@@ -44,7 +44,8 @@ env:
   HELM_INSTALL_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
   # Must match an existing ECR repository in your account (create in AWS if missing).
   # GitHub Variables treat whitespace-only values as truthy for || ; normalization happens in validate-aws / compute artifact metadata.
-  ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME != '' && vars.ECR_REPOSITORY_NAME || 'ltt-ltc-devops' }}
+  ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME != '' && vars.ECR_REPOSITORY_NAME || 'devops-final-app' }}
+  # EKS blue targets: vars.EKS_BLUE_CLUSTERS (comma-separated) or vars.EKS_CLUSTER_NAME; deploy-blue resolves with default devops-final-dev-eks (Terraform locals: "${project}-${environment}-eks").
 
 jobs:
   ci-gates:
@@ -102,7 +103,7 @@ jobs:
           trim() { printf '%s' "${1:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
           REPO="$(trim "${REPO_RAW:-}")"
           if [[ -z "$REPO" ]]; then REPO="$(trim "${REPO_WORKFLOW:-}")"; fi
-          if [[ -z "$REPO" ]]; then REPO="ltt-ltc-devops"; fi
+          if [[ -z "$REPO" ]]; then REPO="devops-final-app"; fi
           echo "Effective ECR_REPOSITORY_NAME for images: ${REPO}"
 
   build-and-push:
@@ -144,7 +145,7 @@ jobs:
           REGISTRY="${REGISTRY%/}"
           REPO="$(trim "${REPO_RAW:-}")"
           if [[ -z "$REPO" ]]; then REPO="$(trim "${REPO_WORKFLOW:-}")"; fi
-          if [[ -z "$REPO" ]]; then REPO="ltt-ltc-devops"; fi
+          if [[ -z "$REPO" ]]; then REPO="devops-final-app"; fi
           if [[ -z "${REGISTRY:-}" ]]; then
             echo "::error::Amazon ECR login did not produce a registry URI (steps.ecr.outputs.registry). Multi-registry login leaves registry unset — use a single registry or set inputs on aws-actions/amazon-ecr-login@v2."
             exit 1
@@ -192,21 +193,23 @@ jobs:
       NS: ${{ vars.K8S_NAMESPACE || 'default' }}
       VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
       HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
-      BLUE_CLUSTERS: ${{ vars.EKS_BLUE_CLUSTERS }}
       DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
       CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
-      - uses: azure/setup-kubectl@v4
-        with:
-          version: v1.31.0
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.14.4
+      - name: Resolve blue cluster list
+        shell: bash
+        env:
+          BLUE_RAW: ${{ vars.EKS_BLUE_CLUSTERS }}
+          CLUSTER_SINGLE: ${{ vars.EKS_CLUSTER_NAME }}
+        run: |
+          set -euo pipefail
+          trim() { printf '%s' "${1:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          BLUE="$(trim "${BLUE_RAW:-}")"
+          if [[ -z "$BLUE" ]]; then BLUE="$(trim "${CLUSTER_SINGLE:-}")"; fi
+          if [[ -z "$BLUE" ]]; then BLUE="devops-final-dev-eks"; fi
+          echo "BLUE_CLUSTERS=${BLUE}" >> "$GITHUB_ENV"
+          echo "Resolved BLUE_CLUSTERS=${BLUE}"
       - name: Validate required variables
         shell: bash
         run: |
@@ -217,6 +220,16 @@ jobs:
               exit 1
             fi
           done
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.31.0
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
       - name: Deploy image to blue clusters
         shell: bash
         run: |
@@ -253,7 +266,7 @@ jobs:
         run: |
           {
             echo "## Blue deployment"
-            echo "- Clusters: ${{ vars.EKS_BLUE_CLUSTERS }}"
+            echo "- Clusters: ${{ env.BLUE_CLUSTERS }}"
             echo "- Image: ${IMG_REPO}:${IMG_TAG}"
           } >> "$GITHUB_STEP_SUMMARY"
 
