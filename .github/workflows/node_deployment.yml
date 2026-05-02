@@ -31,8 +31,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  # Defaults match this repo’s Helm chart (helm/app, release api → Deployment api-app)
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  # Defaults match this repo’s Helm chart (helm/app, release api → Deployment api-app).
+  # Use workflow env only (don’t reference env.* inside job-level env — it resolves empty).
   HELM_CHART_PATH: ${{ vars.HELM_CHART_PATH || 'helm/app' }}
   HELM_RELEASE_NAME: ${{ vars.HELM_RELEASE_NAME || 'api' }}
   K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'default' }}
@@ -136,11 +137,11 @@ jobs:
     env:
       IMG_REPO: ${{ needs.build-and-push.outputs.image_repo }}
       IMG_TAG: ${{ needs.build-and-push.outputs.image_tag }}
-      RELEASE: ${{ env.HELM_RELEASE_NAME }}
-      CHART: ${{ env.HELM_CHART_PATH }}
-      NS: ${{ env.K8S_NAMESPACE }}
-      VALUES_FILE: ${{ env.HELM_VALUES_FILE }}
-      HELM_TIMEOUT: ${{ env.HELM_INSTALL_TIMEOUT }}
+      RELEASE: ${{ vars.HELM_RELEASE_NAME || 'api' }}
+      CHART: ${{ vars.HELM_CHART_PATH || 'helm/app' }}
+      NS: ${{ vars.K8S_NAMESPACE || 'default' }}
+      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+      HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
       BLUE_CLUSTERS: ${{ vars.EKS_BLUE_CLUSTERS }}
       DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
       CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
@@ -195,7 +196,7 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             "${CMD[@]}"
-            kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
+            kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
           done
       - name: Blue deployment summary
@@ -234,11 +235,11 @@ jobs:
     env:
       IMG_REPO: ${{ needs.build-and-push.outputs.image_repo }}
       IMG_TAG: ${{ needs.build-and-push.outputs.image_tag }}
-      RELEASE: ${{ env.HELM_RELEASE_NAME }}
-      CHART: ${{ env.HELM_CHART_PATH }}
-      NS: ${{ env.K8S_NAMESPACE }}
-      VALUES_FILE: ${{ env.HELM_VALUES_FILE }}
-      HELM_TIMEOUT: ${{ env.HELM_INSTALL_TIMEOUT }}
+      RELEASE: ${{ vars.HELM_RELEASE_NAME || 'api' }}
+      CHART: ${{ vars.HELM_CHART_PATH || 'helm/app' }}
+      NS: ${{ vars.K8S_NAMESPACE || 'default' }}
+      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+      HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
       GREEN_CLUSTERS: ${{ vars.EKS_GREEN_CLUSTERS }}
       DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
       CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
@@ -295,7 +296,7 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             "${CMD[@]}"
-            kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT_NAME }} -n "${NS}" --timeout="${TMO}"
+            kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
             DEPLOYED="${DEPLOYED},${CLUSTER}"
           done
@@ -310,9 +311,10 @@ jobs:
 
   observability-hooks:
     name: Deployment observability hooks
+    # Do not need deploy-green: when EKS_GREEN_CLUSTERS is empty that job is skipped and
+    # depending on it would skip this job (and confuse the graph) despite if: always().
     needs:
       - deploy-blue
-      - deploy-green
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -321,7 +323,6 @@ jobs:
           {
             echo "## Observability Hooks"
             echo "- Blue result: ${{ needs.deploy-blue.result }}"
-            echo "- Green result: ${{ needs.deploy-green.result }}"
             echo "- Suggested metrics window: 24-48 hours after deployment"
             echo "- Track: CPU, memory, pod restarts, HPA desired/current replicas, request latency"
             echo "- Log source: CloudWatch or ELK ingestion status per cluster"
