@@ -234,6 +234,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
+          verify_eks_kubectl_auth() {
+            local cluster="$1"
+            local caller i
+            caller="$(aws sts get-caller-identity --query Arn --output text)"
+            echo "Kubernetes API auth check for cluster ${cluster} (IAM principal: ${caller})"
+            for i in $(seq 1 12); do
+              if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+                return 0
+              fi
+              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/12)..."
+              sleep 10
+            done
+            echo "::error::Cannot authenticate to the Kubernetes API for cluster '${cluster}'. IAM principal: ${caller}. Ensure terraform module github_actions is applied (aws_eks_access_entry + aws_eks_access_policy_association for this role), or create an EKS access entry in AWS Console for the same ARN as vars.AWS_ROLE_TO_ASSUME. Cluster endpoint must be reachable from GitHub-hosted runners (public endpoint or allowed CIDR)."
+            kubectl get ns --request-timeout=45s || true
+            exit 1
+          }
           TMO="${HELM_TIMEOUT:-20m}"
           IFS=',' read -r -a CLUSTERS <<< "${BLUE_CLUSTERS}"
           WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
@@ -251,6 +268,7 @@ jobs:
             fi
             echo "Deploying to blue cluster: ${CLUSTER}"
             aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
+            verify_eks_kubectl_auth "${CLUSTER}"
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
@@ -322,6 +340,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
+          verify_eks_kubectl_auth() {
+            local cluster="$1"
+            local caller i
+            caller="$(aws sts get-caller-identity --query Arn --output text)"
+            echo "Kubernetes API auth check for cluster ${cluster} (IAM principal: ${caller})"
+            for i in $(seq 1 12); do
+              if kubectl get ns --request-timeout=45s >/dev/null 2>&1; then
+                return 0
+              fi
+              echo "Waiting for EKS access entry / IAM propagation (attempt ${i}/12)..."
+              sleep 10
+            done
+            echo "::error::Cannot authenticate to the Kubernetes API for cluster '${cluster}'. IAM principal: ${caller}. Ensure terraform module github_actions is applied (aws_eks_access_entry + aws_eks_access_policy_association for this role), or create an EKS access entry in AWS Console for the same ARN as vars.AWS_ROLE_TO_ASSUME. Cluster endpoint must be reachable from GitHub-hosted runners (public endpoint or allowed CIDR)."
+            kubectl get ns --request-timeout=45s || true
+            exit 1
+          }
           TMO="${HELM_TIMEOUT:-20m}"
           IFS=',' read -r -a CLUSTERS <<< "${GREEN_CLUSTERS}"
           WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
@@ -351,6 +386,7 @@ jobs:
             fi
             echo "Deploying to green cluster: ${CLUSTER}"
             aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
+            verify_eks_kubectl_auth "${CLUSTER}"
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
