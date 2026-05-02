@@ -286,9 +286,9 @@ jobs:
             fi
             echo "Deploying to blue cluster: ${CLUSTER}"
             export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}" --role-arn "${{ vars.AWS_ROLE_TO_ASSUME }}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             verify_eks_kubectl_auth "${CLUSTER}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}" --role-arn "${{ vars.AWS_ROLE_TO_ASSUME }}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             echo "Pre-Helm: $(kubectl config current-context)"
             aws sts get-caller-identity
             kubectl get ns --request-timeout=45s
@@ -413,7 +413,7 @@ jobs:
               C="$(echo "${RAW}" | xargs)"
               [ -z "${C}" ] && continue
               echo "Rollback on green cluster: ${C}"
-              aws eks update-kubeconfig --name "${C}" --region "${AWS_REGION}" --role-arn "${{ vars.AWS_ROLE_TO_ASSUME }}"
+              aws eks update-kubeconfig --name "${C}" --region "${AWS_REGION}"
               helm rollback "${RELEASE}" -n "${NS}" --wait --timeout "${TMO}" || true
             done
           }
@@ -427,9 +427,9 @@ jobs:
             fi
             echo "Deploying to green cluster: ${CLUSTER}"
             export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}" --role-arn "${{ vars.AWS_ROLE_TO_ASSUME }}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             verify_eks_kubectl_auth "${CLUSTER}"
-            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}" --role-arn "${{ vars.AWS_ROLE_TO_ASSUME }}"
+            aws eks update-kubeconfig --name "${CLUSTER}" --region "${AWS_REGION}"
             echo "Pre-Helm: $(kubectl config current-context)"
             aws sts get-caller-identity
             kubectl get ns --request-timeout=45s
