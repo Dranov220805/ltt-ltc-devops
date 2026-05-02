@@ -1,19 +1,15 @@
-name: Build
+name: Security and Code Scan
+
 on:
   push:
-    branches:
-      - main
+    branches: ["main"]
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches: ["main"]
+
 jobs:
-  sonarqube:
-    name: SonarQube
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v6
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  ci-security:
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      run_quality: false
+      run_security: true
+    secrets: inherit

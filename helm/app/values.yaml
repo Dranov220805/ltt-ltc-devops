@@ -1,0 +1,111 @@
+# Default image is overridden by CI (--set-string image.repository / image.tag).
+replicaCount: 2
+
+image:
+  repository: changeme.example.com/app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 523Mi
+
+rollout:
+  strategy:
+    type: RollingUpdate
+    maxUnavailable: 0
+    maxSurge: 1
+  revisionHistoryLimit: 5
+  mode: bluegreen
+
+# HTTP probes - routes added in main.js (/health, /ready)
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /ready
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Horizontal Pod Autoscaler (metrics-server required on cluster)
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 180
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+  # Optional: also scale on memory (requires metrics-server resource metrics)
+  # targetMemoryUtilizationPercentage: 80
+
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "3000"
+
+# Extra env (e.g. MONGO_URI from secrets) - append in env-specific values files.
+extraEnv: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+blueGreen:
+  enabled: true
+  blueClusters: ""
+  greenClusters: ""
+
+canary:
+  enabled: false
+  replicas: 1
+  hpaEnabled: false
+  maxUnavailable: 0
+  maxSurge: "100%"
