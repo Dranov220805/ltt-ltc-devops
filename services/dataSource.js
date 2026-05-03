@@ -2,9 +2,23 @@ const { v4: uuidv4 } = require('uuid');
 const ProductModel = require('../models/product');
 const fs = require('fs').promises;
 const path = require('path');
+const s3 = require('./s3');
 
 let inMemory = [];
 let isMongo = false;
+
+/** Remove a file under /uploads/ from disk or S3. */
+async function removeStoredUpload(imageUrl) {
+  if (!imageUrl || !imageUrl.startsWith('/uploads/')) return;
+  if (s3.s3Enabled()) {
+    try {
+      await s3.deleteUpload(imageUrl);
+    } catch (e) { /* ignore */ }
+    return;
+  }
+  const filePath = path.join(__dirname, '..', 'public', imageUrl.substring(1));
+  try { await fs.unlink(filePath); } catch (e) { /* ignore */ }
+}
 
 function createAppleProducts() {
   // Realistic Apple product list with example prices and short descriptions
@@ -133,16 +147,20 @@ async function create(payload) {
 
 async function replace(id, payload) {
   if (isMongo) {
+    if (payload.imageUrl) {
+      const prevDoc = await ProductModel.findById(id).lean();
+      if (prevDoc && prevDoc.imageUrl && prevDoc.imageUrl.startsWith('/uploads/') && prevDoc.imageUrl !== payload.imageUrl) {
+        await removeStoredUpload(prevDoc.imageUrl);
+      }
+    }
     const doc = await ProductModel.findByIdAndUpdate(id, payload, { new: true, runValidators: true }).lean();
     return toDTO(doc);
   }
   const idx = inMemory.findIndex(p => p.id === id);
   if (idx === -1) return null;
   const prev = inMemory[idx];
-  // if payload contains imageUrl and prev had a local upload, remove old file
-  if (payload.imageUrl && prev && prev.imageUrl && prev.imageUrl.startsWith('/uploads/')) {
-    const filePath = path.join(__dirname, '..', 'public', prev.imageUrl.substring(1));
-    try { await fs.unlink(filePath); } catch (e) { /* ignore */ }
+  if (payload.imageUrl && prev && prev.imageUrl && prev.imageUrl.startsWith('/uploads/') && prev.imageUrl !== payload.imageUrl) {
+    await removeStoredUpload(prev.imageUrl);
   }
   const item = { id, ...payload };
   inMemory[idx] = item;
@@ -154,9 +172,8 @@ async function patch(id, payload) {
     // if updating image, delete previous uploaded file
     if (payload.imageUrl) {
       const prevDoc = await ProductModel.findById(id).lean();
-      if (prevDoc && prevDoc.imageUrl && prevDoc.imageUrl.startsWith('/uploads/')) {
-        const filePath = path.join(__dirname, '..', 'public', prevDoc.imageUrl.substring(1));
-        try { await fs.unlink(filePath); } catch (e) { /* ignore */ }
+      if (prevDoc && prevDoc.imageUrl && prevDoc.imageUrl.startsWith('/uploads/') && prevDoc.imageUrl !== payload.imageUrl) {
+        await removeStoredUpload(prevDoc.imageUrl);
       }
     }
     const doc = await ProductModel.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
@@ -165,9 +182,8 @@ async function patch(id, payload) {
   const item = inMemory.find(p => p.id === id);
   if (!item) return null;
   // handle image replacement: delete old file if needed
-  if (payload.imageUrl && item.imageUrl && item.imageUrl.startsWith('/uploads/')) {
-    const filePath = path.join(__dirname, '..', 'public', item.imageUrl.substring(1));
-    try { await fs.unlink(filePath); } catch (e) { /* ignore */ }
+  if (payload.imageUrl && item.imageUrl && item.imageUrl.startsWith('/uploads/') && item.imageUrl !== payload.imageUrl) {
+    await removeStoredUpload(item.imageUrl);
   }
   Object.assign(item, payload);
   return item;
@@ -177,8 +193,7 @@ async function remove(id) {
   if (isMongo) {
     const doc = await ProductModel.findByIdAndDelete(id).lean();
     if (doc && doc.imageUrl && doc.imageUrl.startsWith('/uploads/')) {
-      const filePath = path.join(__dirname, '..', 'public', doc.imageUrl.substring(1));
-      try { await fs.unlink(filePath); } catch (e) { /* ignore */ }
+      await removeStoredUpload(doc.imageUrl);
     }
     return toDTO(doc);
   }
@@ -186,8 +201,7 @@ async function remove(id) {
   if (idx === -1) return null;
   const [deleted] = inMemory.splice(idx, 1);
   if (deleted && deleted.imageUrl && deleted.imageUrl.startsWith('/uploads/')) {
-    const filePath = path.join(__dirname, '..', 'public', deleted.imageUrl.substring(1));
-    try { await fs.unlink(filePath); } catch (e) { /* ignore */ }
+    await removeStoredUpload(deleted.imageUrl);
   }
   return deleted;
 }
