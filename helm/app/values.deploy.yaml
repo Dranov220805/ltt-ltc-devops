@@ -39,11 +39,25 @@ extraEnv:
 
 # Merge with base values.yaml - extend readiness window while Mongo connects.
 probes:
+  liveness:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 6
   readiness:
     initialDelaySeconds: 15
     periodSeconds: 5
     timeoutSeconds: 3
-    failureThreshold: 10
+    failureThreshold: 24
+
+# Node + mongoose retries: avoid OOM kills (exit 137) under cgroup limit.
+resources:
+  limits:
+    cpu: "2"
+    memory: 768Mi
+  requests:
+    cpu: 100m
+    memory: 384Mi
 
 # --- IRSA for S3: uncomment and set role ARN from Terraform (no AWS keys in Secret) ---
 # serviceAccount:
