@@ -26,6 +26,10 @@ async function resolveImageUrlFromFile(file) {
     await s3.putUpload(filename, file.buffer, file.mimetype);
     return `/uploads/${filename}`;
   }
+  if (file.buffer && process.env.FORCE_MEMORY_UPLOADS === 'true') {
+    console.warn('Skipping image persist: disk uploads disabled (read-only FS) and S3_BUCKET unset.');
+    return undefined;
+  }
   return `/uploads/${file.filename}`;
 }
 

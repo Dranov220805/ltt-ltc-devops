@@ -1,16 +1,53 @@
-# Production overrides. Set GitHub repo variable HELM_VALUES_FILE=helm/app/values.deploy.yaml
-# Secrets must not be committed. Enable SYNC_K8S_RUNTIME_SECRET and GitHub Secrets:
-# APP_MONGO_URI, APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET (optional APP_AWS_REGION).
-# CI applies Secret api-runtime-env. Override secret name with RUNTIME_SECRET_NAME + edit secretRef below.
+# =============================================================================
+# Production overlay - reference from GitHub: HELM_VALUES_FILE=helm/app/values.deploy.yaml
+# =============================================================================
+# Before deploy:
+#   1) Repo variable SYNC_K8S_RUNTIME_SECRET=true (CI applies Secret before helm upgrade).
+#   2) GitHub Secrets: APP_MONGO_URI, APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET
+#      Optional: APP_AWS_REGION (else workflow AWS_REGION + extraEnv below set region).
+#   3) Terraform IAM: IRSA role for S3; annotate the pod ServiceAccount (see bottom).
 #
-# EKS: use IRSA on the pod ServiceAccount for S3 (no static AWS keys in Secret).
+# Secret api-runtime-env must exist in the target namespace (sync script creates it).
+# Override name with repo variable RUNTIME_SECRET_NAME and change secretRef.name to match.
+# =============================================================================
 
 envFrom:
   - secretRef:
       name: api-runtime-env
 
 extraEnv:
+  # Fail startup if DocumentDB is wrong (do not silently use in-memory data).
   - name: ALLOW_IN_MEMORY_FALLBACK
     value: "false"
   - name: SESSION_COOKIE_SECURE
     value: "true"
+  # Explicit region avoids relying on Secret alone (IAM/S3 SDK default chain).
+  - name: AWS_REGION
+    value: ap-southeast-1
+  # DocumentDB / slow DNS during rollout
+  - name: MONGO_SERVER_SELECTION_TIMEOUT_MS
+    value: "45000"
+  - name: MONGO_CONNECT_RETRIES
+    value: "10"
+  - name: MONGO_CONNECT_RETRY_DELAY_MS
+    value: "4000"
+  # Optional Redis tuning (override if needed)
+  - name: REDIS_CONNECT_TIMEOUT_MS
+    value: "15000"
+  - name: REDIS_READY_TIMEOUT_MS
+    value: "20000"
+
+# Merge with base values.yaml - extend readiness window while Mongo connects.
+probes:
+  readiness:
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 10
+
+# --- IRSA for S3: uncomment and set role ARN from Terraform (no AWS keys in Secret) ---
+# serviceAccount:
+#   create: true
+#   name: api-app
+#   annotations:
+#     eks.amazonaws.com/role-arn: arn:aws:iam::525089404588:role/YOUR_IRSA_ROLE_NAME

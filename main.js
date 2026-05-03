@@ -2,15 +2,32 @@ require('dotenv').config({
   path: process.env.DOTENV_CONFIG_PATH || '.env',
   override: false
 });
+const path = require('path');
+const fs = require('fs');
+const s3 = require('./services/s3');
+
+/** Must run before routes load multer (disk vs memory). Read-only container FS without S3 would throw here otherwise. */
+const publicDir = path.join(__dirname, 'public');
+const uploadsDir = path.join(publicDir, 'uploads');
+if (!s3.s3Enabled()) {
+  try {
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+  } catch (err) {
+    process.env.FORCE_MEMORY_UPLOADS = 'true';
+    console.warn(
+      `Uploads directory not writable (${err.code || 'ERR'}): ${err.message}. Using memory-only multipart handling; image bytes are not persisted without S3_BUCKET or a writable volume at ${uploadsDir}.`
+    );
+  }
+}
+
 const express = require('express');
 const mongoose = require('mongoose');
 const os = require('os');
 const productRoutes = require('./routes/productRoutes');
 const dataSource = require('./services/dataSource');
 const uiRoutes = require('./routes/uiRoutes');
-const path = require('path');
-const fs = require('fs');
-const s3 = require('./services/s3');
 const runtimeInfo = require('./services/runtimeInfo');
 
 const app = express();
@@ -39,9 +56,6 @@ app.get('/ready', (req, res) => {
 // view engine
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
-
-const publicDir = path.join(__dirname, 'public');
-const uploadsDir = path.join(publicDir, 'uploads');
 
 if (s3.s3Enabled()) {
   app.use('/uploads', (req, res, next) => {
@@ -234,13 +248,6 @@ async function bootstrap() {
 
   app.use('/', uiRoutes);
   app.use('/products', productRoutes);
-
-  if (!s3.s3Enabled()) {
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-      console.log(`Created uploads directory at ${uploadsDir}`);
-    }
-  }
 
   const mongoUri =
     String(process.env.MONGO_URI || '')

@@ -26,3 +26,11 @@ app.ltt-ltc.io/rollout-mode: {{ .Values.rollout.mode | quote }}
 app.kubernetes.io/name: {{ include "app.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{- define "app.serviceAccountName" -}}
+{{- if .Values.serviceAccount.name }}
+{{- .Values.serviceAccount.name }}
+{{- else }}
+{{- include "app.fullname" . }}
+{{- end }}
+{{- end }}
