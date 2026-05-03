@@ -1,9 +1,14 @@
 const os = require('os');
 const dataSource = require('../services/dataSource');
 const s3 = require('../services/s3');
+const runtimeInfo = require('../services/runtimeInfo');
 
 function meta() {
-  return { hostname: os.hostname(), source: dataSource.isMongo ? 'mongodb' : 'in-memory' };
+  return {
+    hostname: os.hostname(),
+    source: dataSource.isMongo ? 'mongodb' : 'in-memory',
+    ...runtimeInfo.getMetaAugment()
+  };
 }
 
 function safeImageFilename(originalname) {

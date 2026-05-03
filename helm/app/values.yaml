@@ -96,6 +96,14 @@ env:
 # ALLOW_IN_MEMORY_FALLBACK=false, SESSION_COOKIE_SECURE=true — see .env.example.
 extraEnv: []
 
+# Optional: load every key from an existing Secret as container env (recommended for GitHub Actions:
+# kubectl create secret generic ... --from-literal=MONGO_URI=... then set secretRef below).
+# Explicit entries in env / extraEnv override duplicate keys from envFrom.
+# envFrom:
+#   - secretRef:
+#       name: api-runtime-env
+envFrom: []
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

@@ -1,4 +1,7 @@
-require('dotenv').config();
+require('dotenv').config({
+  path: process.env.DOTENV_CONFIG_PATH || '.env',
+  override: false
+});
 const express = require('express');
 const mongoose = require('mongoose');
 const os = require('os');
@@ -8,37 +11,12 @@ const uiRoutes = require('./routes/uiRoutes');
 const path = require('path');
 const fs = require('fs');
 const s3 = require('./services/s3');
+const runtimeInfo = require('./services/runtimeInfo');
 
 const app = express();
 
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
-}
-
-const redisUrl = String(process.env.REDIS_URL || '').trim();
-const sessionSecret = String(process.env.SESSION_SECRET || '').trim();
-if (redisUrl && sessionSecret) {
-  const session = require('express-session');
-  const RedisStore = require('connect-redis').default;
-  const Redis = require('ioredis');
-  const redisClient = new Redis(redisUrl);
-  const secureCookie =
-    String(process.env.SESSION_COOKIE_SECURE || '').toLowerCase() === 'true' ||
-    process.env.NODE_ENV === 'production';
-  app.use(
-    session({
-      store: new RedisStore({ client: redisClient }),
-      secret: sessionSecret,
-      resave: false,
-      saveUninitialized: false,
-      name: 'sid',
-      cookie: {
-        secure: secureCookie,
-        httpOnly: true,
-        maxAge: Number(process.env.SESSION_MAX_AGE_MS) || 86400000
-      }
-    })
-  );
 }
 
 app.use(express.json());
@@ -82,13 +60,80 @@ if (s3.s3Enabled()) {
 
 app.use(express.static(publicDir));
 
-app.use('/', uiRoutes);
-app.use('/products', productRoutes);
-
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const allowInMemoryFallback =
   String(process.env.ALLOW_IN_MEMORY_FALLBACK || 'true').toLowerCase() !== 'false';
+
+/**
+ * Attach Redis-backed sessions when REDIS_URL and SESSION_SECRET are set.
+ * On failure, logs and continues without Redis (app stays up).
+ * @param {import('express').Express} expressApp
+ */
+async function attachRedisSessionIfConfigured(expressApp) {
+  const redisUrl = String(process.env.REDIS_URL || '').trim();
+  const sessionSecret = String(process.env.SESSION_SECRET || '').trim();
+  if (!redisUrl || !sessionSecret) {
+    runtimeInfo.setRedisUnset();
+    return;
+  }
+
+  const session = require('express-session');
+  const RedisStore = require('connect-redis').default;
+  const Redis = require('ioredis');
+
+  const connectTimeout = Number(process.env.REDIS_CONNECT_TIMEOUT_MS) || 15000;
+  const readyTimeout = Number(process.env.REDIS_READY_TIMEOUT_MS) || 15000;
+
+  let redisClient;
+  try {
+    redisClient = new Redis(redisUrl, {
+      maxRetriesPerRequest: null,
+      connectTimeout,
+      retryStrategy(times) {
+        return Math.min(times * 400, 5000);
+      }
+    });
+
+    await Promise.race([
+      new Promise((resolve, reject) => {
+        redisClient.once('ready', resolve);
+        redisClient.once('error', reject);
+      }),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Redis ready timeout')), readyTimeout);
+      })
+    ]);
+  } catch (err) {
+    console.warn(`Redis session disabled (${err.message}) — continuing without Redis store.`);
+    if (redisClient) {
+      redisClient.disconnect();
+    }
+    runtimeInfo.setRedisUnavailable(runtimeInfo.summarizeRedisUrl(redisUrl), err.message);
+    return;
+  }
+
+  runtimeInfo.attachRedisSessionClient(redisClient, runtimeInfo.summarizeRedisUrl(redisUrl));
+
+  const secureCookie =
+    String(process.env.SESSION_COOKIE_SECURE || '').toLowerCase() === 'true' ||
+    process.env.NODE_ENV === 'production';
+
+  expressApp.use(
+    session({
+      store: new RedisStore({ client: redisClient }),
+      secret: sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      name: 'sid',
+      cookie: {
+        secure: secureCookie,
+        httpOnly: true,
+        maxAge: Number(process.env.SESSION_MAX_AGE_MS) || 86400000
+      }
+    })
+  );
+}
 
 /**
  * @param {string} uri
@@ -96,7 +141,7 @@ const allowInMemoryFallback =
  */
 function mongooseConnectOptions(uri) {
   const serverSelectionTimeoutMS =
-    Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 30000;
+    Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 45000;
   if (uri.startsWith('mongodb+srv://')) {
     return {
       serverSelectionTimeoutMS,
@@ -151,7 +196,45 @@ function assertMongoUriLooksValid(uri) {
   }
 }
 
-async function start() {
+/**
+ * @param {string} mongoUri
+ */
+async function connectMongoWithRetries(mongoUri) {
+  const maxAttempts = Number(process.env.MONGO_CONNECT_RETRIES) || 10;
+  const delayMs = Number(process.env.MONGO_CONNECT_RETRY_DELAY_MS) || 4000;
+
+  assertMongoUriLooksValid(mongoUri);
+
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.disconnect();
+      }
+      await mongoose.connect(mongoUri, mongooseConnectOptions(mongoUri));
+      try {
+        await mongoose.connection.db.admin().command({ ping: 1 });
+      } catch (pingErr) {
+        console.warn('Mongo ping skipped:', pingErr.message);
+      }
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`MongoDB connection attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+async function bootstrap() {
+  await attachRedisSessionIfConfigured(app);
+
+  app.use('/', uiRoutes);
+  app.use('/products', productRoutes);
+
   if (!s3.s3Enabled()) {
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
@@ -159,16 +242,14 @@ async function start() {
     }
   }
 
-  const mongoUri = String(process.env.MONGO_URI || '')
-    .trim()
-    .replace(/^['"]|['"]$/g, '') || 'mongodb://localhost:27017/products_db';
+  const mongoUri =
+    String(process.env.MONGO_URI || '')
+      .trim()
+      .replace(/^['"]|['"]$/g, '') || 'mongodb://localhost:27017/products_db';
+
   let usingMongo = false;
   try {
-    assertMongoUriLooksValid(mongoUri);
-    await mongoose.connect(mongoUri, mongooseConnectOptions(mongoUri));
-    if (mongoUri.startsWith('mongodb+srv://')) {
-      await mongoose.connection.db.admin().command({ ping: 1 });
-    }
+    await connectMongoWithRetries(mongoUri);
     usingMongo = true;
     console.log('Connected to MongoDB — using mongodb as data source.');
   } catch (err) {
@@ -197,6 +278,9 @@ async function start() {
   });
 }
 
-start();
+bootstrap().catch((err) => {
+  console.error('Fatal startup error:', err);
+  process.exit(1);
+});
 
 module.exports = app;
