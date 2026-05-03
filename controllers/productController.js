@@ -1,8 +1,27 @@
 const os = require('os');
 const dataSource = require('../services/dataSource');
+const s3 = require('../services/s3');
 
 function meta() {
   return { hostname: os.hostname(), source: dataSource.isMongo ? 'mongodb' : 'in-memory' };
+}
+
+function safeImageFilename(originalname) {
+  return Date.now() + '-' + String(originalname || 'image').replace(/[^a-zA-Z0-9.\-_]/g, '_');
+}
+
+/**
+ * @param {import('multer').File} [file]
+ * @returns {Promise<string|undefined>} imageUrl to store
+ */
+async function resolveImageUrlFromFile(file) {
+  if (!file) return undefined;
+  if (s3.s3Enabled()) {
+    const filename = safeImageFilename(file.originalname);
+    await s3.putUpload(filename, file.buffer, file.mimetype);
+    return `/uploads/${filename}`;
+  }
+  return `/uploads/${file.filename}`;
 }
 
 async function list(req, res, next) {
@@ -24,7 +43,8 @@ async function create(req, res, next) {
   try {
     const file = req.file;
     const payload = (({ name, price, color, description }) => ({ name, price, color, description }))(req.body);
-    if (file) payload.imageUrl = `/uploads/${file.filename}`;
+    const imageUrl = await resolveImageUrlFromFile(file);
+    if (imageUrl) payload.imageUrl = imageUrl;
     const item = await dataSource.create(payload);
     res.status(201).json({ data: item, ...meta() });
   } catch (err) { next(err); }
@@ -34,7 +54,8 @@ async function put(req, res, next) {
   try {
     const file = req.file;
     const payload = (({ name, price, color, description }) => ({ name, price, color, description }))(req.body);
-    if (file) payload.imageUrl = `/uploads/${file.filename}`;
+    const imageUrl = await resolveImageUrlFromFile(file);
+    if (imageUrl) payload.imageUrl = imageUrl;
     const item = await dataSource.replace(req.params.id, payload);
     if (!item) return res.status(404).json({ message: 'Not found', ...meta() });
     res.json({ data: item, ...meta() });
@@ -46,7 +67,8 @@ async function patch(req, res, next) {
     const file = req.file;
     const payload = {};
     ['name','price','color','description'].forEach(k => { if (k in req.body) payload[k] = req.body[k]; });
-    if (file) payload.imageUrl = `/uploads/${file.filename}`;
+    const imageUrl = await resolveImageUrlFromFile(file);
+    if (imageUrl) payload.imageUrl = imageUrl;
     const item = await dataSource.patch(req.params.id, payload);
     if (!item) return res.status(404).json({ message: 'Not found', ...meta() });
     res.json({ data: item, ...meta() });

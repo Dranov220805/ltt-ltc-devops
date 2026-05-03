@@ -5,9 +5,11 @@ const validators = require('../validators/productValidator');
 const { validationResult } = require('express-validator');
 const multer = require('multer');
 const path = require('path');
+const s3 = require('../services/s3');
 
-// multer storage config
-const storage = multer.diskStorage({
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+const diskStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, path.join(__dirname, '..', 'public', 'uploads'));
   },
@@ -16,7 +18,21 @@ const storage = multer.diskStorage({
     cb(null, safe);
   }
 });
-const upload = multer({ storage });
+
+function buildUpload() {
+  if (s3.s3Enabled()) {
+    return multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: MAX_FILE_BYTES }
+    });
+  }
+  return multer({
+    storage: diskStorage,
+    limits: { fileSize: MAX_FILE_BYTES }
+  });
+}
+
+const upload = buildUpload();
 
 function handleValidation(req, res, next) {
   const errors = validationResult(req);

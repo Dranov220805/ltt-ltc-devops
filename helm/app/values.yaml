@@ -1,5 +1,5 @@
 # Default image is overridden by CI (--set-string image.repository / image.tag).
-replicaCount: 2
+replicaCount: 1
 
 image:
   repository: changeme.example.com/app
@@ -65,8 +65,8 @@ probes:
 # Horizontal Pod Autoscaler (metrics-server required on cluster)
 hpa:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 10
+  minReplicas: 1
+  maxReplicas: 3
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 70
   behavior:
@@ -91,7 +91,9 @@ env:
   - name: PORT
     value: "3000"
 
-# Extra env (e.g. MONGO_URI from secrets) - append in env-specific values files.
+# Extra env for production (prefer a separate values file + K8s Secrets):
+# MONGO_URI, S3_BUCKET, AWS_REGION, REDIS_URL, SESSION_SECRET, DOCUMENTDB_TLS_CA_PATH,
+# ALLOW_IN_MEMORY_FALLBACK=false, SESSION_COOKIE_SECURE=true — see .env.example.
 extraEnv: []
 
 nodeSelector: {}
