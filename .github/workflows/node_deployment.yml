@@ -354,7 +354,7 @@ jobs:
           set -euo pipefail
           M="${{ github.event.inputs.stabilization_minutes }}"
           if [ -z "${M}" ]; then
-            M=20
+            M=5
           fi
           if [ "${M}" -gt 0 ]; then
             echo "Waiting ${M} minutes."
