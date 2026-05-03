@@ -40,8 +40,9 @@ env:
   HELM_RELEASE_NAME: ${{ vars.HELM_RELEASE_NAME || 'api' }}
   K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'default' }}
   K8S_DEPLOYMENT_NAME: ${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}
-  HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
-  # Optional: SYNC_K8S_RUNTIME_SECRET=true + Secrets APP_MONGO_URI, APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET apply Secret before Helm (see helm/app/values.deploy.yaml).
+  HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE != '' && vars.HELM_VALUES_FILE || 'helm/app/values.deploy.yaml' }}
+  # Optional: SYNC_K8S_RUNTIME_SECRET=true creates/updates runtime Secret before Helm.
+  # For in-cluster data services, APP_MONGO_URI / APP_REDIS_URL may be omitted (workflow derives cluster DNS).
   HELM_INSTALL_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
   # Must match an existing ECR repository in your account (create in AWS if missing).
   # GitHub Variables treat whitespace-only values as truthy for || ; normalization happens in validate-aws / compute artifact metadata.
@@ -192,7 +193,7 @@ jobs:
       RELEASE: ${{ vars.HELM_RELEASE_NAME || 'api' }}
       CHART: ${{ vars.HELM_CHART_PATH || 'helm/app' }}
       NS: ${{ vars.K8S_NAMESPACE || 'default' }}
-      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+      VALUES_FILE: ${{ vars.HELM_VALUES_FILE != '' && vars.HELM_VALUES_FILE || 'helm/app/values.deploy.yaml' }}
       HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
       DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
       CLUSTER_WAVE_SIZE: ${{ github.event.inputs.cluster_wave_size || '1' }}
@@ -236,6 +237,10 @@ jobs:
         env:
           SYNC_RUNTIME_SECRET: ${{ vars.SYNC_K8S_RUNTIME_SECRET }}
           RUNTIME_SECRET_NAME: ${{ vars.RUNTIME_SECRET_NAME || 'api-runtime-env' }}
+          INCLUSTER_DATA_SERVICES: ${{ vars.INCLUSTER_DATA_SERVICES || 'true' }}
+          K8S_MONGO_SERVICE_NAME: ${{ vars.K8S_MONGO_SERVICE_NAME || 'mongodb' }}
+          K8S_REDIS_SERVICE_NAME: ${{ vars.K8S_REDIS_SERVICE_NAME || 'redis' }}
+          K8S_MONGO_DB_NAME: ${{ vars.K8S_MONGO_DB_NAME || 'products_db' }}
           APP_MONGO_URI: ${{ secrets.APP_MONGO_URI }}
           APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
           APP_REDIS_URL: ${{ secrets.APP_REDIS_URL }}
@@ -365,7 +370,7 @@ jobs:
       RELEASE: ${{ vars.HELM_RELEASE_NAME || 'api' }}
       CHART: ${{ vars.HELM_CHART_PATH || 'helm/app' }}
       NS: ${{ vars.K8S_NAMESPACE || 'default' }}
-      VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+      VALUES_FILE: ${{ vars.HELM_VALUES_FILE != '' && vars.HELM_VALUES_FILE || 'helm/app/values.deploy.yaml' }}
       HELM_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
       GREEN_CLUSTERS: ${{ vars.EKS_GREEN_CLUSTERS }}
       DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_strategy || 'bluegreen' }}
@@ -387,6 +392,10 @@ jobs:
         env:
           SYNC_RUNTIME_SECRET: ${{ vars.SYNC_K8S_RUNTIME_SECRET }}
           RUNTIME_SECRET_NAME: ${{ vars.RUNTIME_SECRET_NAME || 'api-runtime-env' }}
+          INCLUSTER_DATA_SERVICES: ${{ vars.INCLUSTER_DATA_SERVICES || 'true' }}
+          K8S_MONGO_SERVICE_NAME: ${{ vars.K8S_MONGO_SERVICE_NAME || 'mongodb' }}
+          K8S_REDIS_SERVICE_NAME: ${{ vars.K8S_REDIS_SERVICE_NAME || 'redis' }}
+          K8S_MONGO_DB_NAME: ${{ vars.K8S_MONGO_DB_NAME || 'products_db' }}
           APP_MONGO_URI: ${{ secrets.APP_MONGO_URI }}
           APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
           APP_REDIS_URL: ${{ secrets.APP_REDIS_URL }}

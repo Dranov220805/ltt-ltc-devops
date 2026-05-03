@@ -12,8 +12,12 @@
       <header class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h3">Products</h1>
         <div class="text-end small text-muted lh-sm">
-          <div>Host: <%= hostname %> · Source: <%= source %></div>
-          <div><%= runtime.database.label %>: <%= runtime.database.backend %> (<%= runtime.database.status %>) — <%= runtime.database.detail %></div>
-          <div><%= runtime.redis.label %>: <%= runtime.redis.backend %> (<%= runtime.redis.status %>) — <%= runtime.redis.detail %></div>
+          <% var rt = locals.runtimeSnapshot;
+             if (!rt || !rt.database) {
+               rt = { database: { label: 'Database', backend: '—', status: 'n/a', detail: 'unavailable' }, redis: { label: 'Sessions', backend: '—', status: 'n/a', detail: 'unavailable' } };
+             } %>
+          <div>Host: <%= locals.hostname %> · Source: <%= locals.source %></div>
+          <div><%= rt.database.label %>: <%= rt.database.backend %> (<%= rt.database.status %>) — <%= rt.database.detail %></div>
+          <div><%= rt.redis.label %>: <%= rt.redis.backend %> (<%= rt.redis.status %>) — <%= rt.redis.detail %></div>
         </div>
       </header>

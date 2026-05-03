@@ -3,14 +3,37 @@
 # =============================================================================
 # Before deploy:
 #   1) Repo variable SYNC_K8S_RUNTIME_SECRET=true (CI applies Secret before helm upgrade).
-#   2) GitHub Secrets: APP_MONGO_URI (required - pod exits if unset in production),
-#      APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET
+#   2) GitHub Secrets: APP_SESSION_SECRET.
+#      Optional overrides: APP_MONGO_URI, APP_REDIS_URL (otherwise CI derives in-cluster service DNS).
+#      Leave APP_S3_BUCKET empty when using uploads PVC.
 #      Optional: APP_AWS_REGION (else workflow AWS_REGION + extraEnv below set region).
-#   3) Terraform IAM: IRSA role for S3; annotate the pod ServiceAccount (see bottom).
+#   3) Terraform: EKS Pod Identity binds IAM to the ServiceAccount below (no IRSA annotation).
+#      terraform output app_uploads_pod_identity_role_arn (informational; association is in AWS).
 #
 # Secret api-runtime-env must exist in the target namespace (sync script creates it).
 # Override name with repo variable RUNTIME_SECRET_NAME and change secretRef.name to match.
+#
+# --- Create Secret manually (PowerShell, namespace default) ---
+# Fill placeholders from Terraform outputs / console. Mongo password must be URL-encoded in MONGO_URI.
+# kubectl create secret generic api-runtime-env -n default `
+#   --from-literal=MONGO_URI="mongodb://mongodb.default.svc.cluster.local:27017/products_db" `
+#   --from-literal=SESSION_SECRET="YOUR_LONG_RANDOM_HEX" `
+#   --from-literal=REDIS_URL="redis://redis.default.svc.cluster.local:6379" `
+#   --from-literal=S3_BUCKET="" `
+#   --from-literal=AWS_REGION="ap-southeast-1" `
+#   --dry-run=client -o yaml | kubectl apply -f -
+#
+# Then from Final_Project: helm upgrade --install api ./helm/app -n default -f ./helm/app/values.deploy.yaml ...
+# From sibling repo (e.g. ltt-ltc-terraform): use ../Final_Project/helm/app (forward slashes; backslashes break Helm on Windows).
+# Or enable CI: SYNC_K8S_RUNTIME_SECRET=true + GitHub Secrets APP_* (see node_deployment.yml).
 # =============================================================================
+
+uploadsPersistence:
+  enabled: true
+  storageClass: gp3
+  accessMode: ReadWriteOnce
+  size: 30Gi
+  mountPath: /app/public/uploads
 
 envFrom:
   - secretRef:
@@ -22,10 +45,7 @@ extraEnv:
     value: "false"
   - name: SESSION_COOKIE_SECURE
     value: "true"
-  # Explicit region avoids relying on Secret alone (IAM/S3 SDK default chain).
-  - name: AWS_REGION
-    value: ap-southeast-1
-  # DocumentDB / slow DNS during rollout
+  # In-cluster Mongo/Redis startup tuning during rollout.
   - name: MONGO_SERVER_SELECTION_TIMEOUT_MS
     value: "45000"
   - name: MONGO_CONNECT_RETRIES
@@ -60,9 +80,8 @@ resources:
     cpu: 100m
     memory: 384Mi
 
-# --- IRSA for S3: uncomment and set role ARN from Terraform (no AWS keys in Secret) ---
-# serviceAccount:
-#   create: true
-#   name: api-app
-#   annotations:
-#     eks.amazonaws.com/role-arn: arn:aws:iam::525089404588:role/YOUR_IRSA_ROLE_NAME
+# EKS Pod Identity (Terraform aws_eks_pod_identity_association): must match app_k8s_* in envs/dev.
+serviceAccount:
+  create: true
+  name: api-app
+  annotations: {}
