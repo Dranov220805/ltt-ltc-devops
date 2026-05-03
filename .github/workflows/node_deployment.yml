@@ -283,7 +283,7 @@ jobs:
             kubectl get ns --request-timeout=45s || true
             exit 1
           }
-          TMO="${HELM_TIMEOUT:-20m}"
+          TMO="${HELM_TIMEOUT:-5m}"
           IFS=',' read -r -a CLUSTERS <<< "${BLUE_CLUSTERS}"
           WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
           if ! [[ "${WAVE_SIZE}" =~ ^[0-9]+$ ]] || [ "${WAVE_SIZE}" -lt 1 ]; then
