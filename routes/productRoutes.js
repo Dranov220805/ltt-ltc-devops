@@ -20,7 +20,7 @@ const diskStorage = multer.diskStorage({
 });
 
 function buildUpload() {
-  if (s3.s3Enabled()) {
+  if (s3.s3Enabled() || process.env.FORCE_MEMORY_UPLOADS === 'true') {
     return multer({
       storage: multer.memoryStorage(),
       limits: { fileSize: MAX_FILE_BYTES }

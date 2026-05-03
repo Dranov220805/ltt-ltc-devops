@@ -24,10 +24,8 @@ spec:
       labels:
         {{- include "app.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.serviceAccount }}
-      {{- if .create }}
-      serviceAccountName: {{ .name | default (include "app.fullname" $) }}
-      {{- end }}
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "app.serviceAccountName" . }}
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
