@@ -105,6 +105,14 @@ extraEnv: []
 #       name: api-runtime-env
 envFrom: []
 
+uploadsPersistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 20Gi
+  mountPath: /app/public/uploads
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

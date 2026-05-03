@@ -7,12 +7,12 @@ const runtimeInfo = require('../services/runtimeInfo');
 router.get('/', async (req, res, next) => {
   try {
     const products = await dataSource.getAll();
-    const runtime = runtimeInfo.getSnapshot({ appUsesMongo: dataSource.isMongo });
+    const runtimeSnapshot = runtimeInfo.getSnapshot({ appUsesMongo: dataSource.isMongo });
     res.render('index', {
       products,
       hostname: os.hostname(),
       source: dataSource.isMongo ? 'mongodb' : 'in-memory',
-      runtime
+      runtimeSnapshot
     });
   } catch (err) { next(err); }
 });

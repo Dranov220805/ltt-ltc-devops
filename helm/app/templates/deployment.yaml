@@ -68,6 +68,17 @@ spec:
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.uploadsPersistence.enabled }}
+          volumeMounts:
+            - name: uploads-data
+              mountPath: {{ .Values.uploadsPersistence.mountPath }}
+          {{- end }}
+      {{- if .Values.uploadsPersistence.enabled }}
+      volumes:
+        - name: uploads-data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-uploads" (include "app.fullname" .)) .Values.uploadsPersistence.existingClaim }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
