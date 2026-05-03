@@ -246,8 +246,29 @@ async function connectMongoWithRetries(mongoUri) {
 async function bootstrap() {
   await attachRedisSessionIfConfigured(app);
 
+  /**
+   * Kubernetes probes must reach /health while Mongo still connects (retries can take minutes).
+   * /ready stays 503 until dataSource.init completes.
+   */
+  app.use((req, res, next) => {
+    if (appReady) return next();
+    const base = (req.originalUrl || '').split('?')[0];
+    if (base === '/health' || base.startsWith('/health')) return next();
+    if (base === '/ready' || base.startsWith('/ready')) return next();
+    res.status(503).json({ status: 'starting', message: 'Database initializing' });
+  });
+
   app.use('/', uiRoutes);
   app.use('/products', productRoutes);
+
+  await new Promise((resolve, reject) => {
+    app.listen(PORT, () => {
+      console.log(
+        `HTTP listening on port ${PORT} — hostname: ${os.hostname()} (Mongo/data layer still warming)`
+      );
+      resolve(undefined);
+    }).on('error', reject);
+  });
 
   const mongoUri =
     String(process.env.MONGO_URI || '')
@@ -278,11 +299,8 @@ async function bootstrap() {
 
   await dataSource.init(usingMongo);
 
-  app.listen(PORT, () => {
-    appReady = true;
-    console.log(`Server listening on port http://localhost:${PORT} — hostname: ${os.hostname()}`);
-    console.log(`Data source in use: ${dataSource.isMongo ? 'mongodb' : 'in-memory'}`);
-  });
+  appReady = true;
+  console.log(`Application ready — data source: ${dataSource.isMongo ? 'mongodb' : 'in-memory'}`);
 }
 
 bootstrap().catch((err) => {
