@@ -1,0 +1,16 @@
+# Production overrides. Set GitHub repo variable HELM_VALUES_FILE=helm/app/values.deploy.yaml
+# Secrets must not be committed. Enable SYNC_K8S_RUNTIME_SECRET and GitHub Secrets:
+# APP_MONGO_URI, APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET (optional APP_AWS_REGION).
+# CI applies Secret api-runtime-env. Override secret name with RUNTIME_SECRET_NAME + edit secretRef below.
+#
+# EKS: use IRSA on the pod ServiceAccount for S3 (no static AWS keys in Secret).
+
+envFrom:
+  - secretRef:
+      name: api-runtime-env
+
+extraEnv:
+  - name: ALLOW_IN_MEMORY_FALLBACK
+    value: "false"
+  - name: SESSION_COOKIE_SECURE
+    value: "true"

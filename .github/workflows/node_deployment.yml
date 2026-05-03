@@ -41,6 +41,7 @@ env:
   K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'default' }}
   K8S_DEPLOYMENT_NAME: ${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}
   HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE }}
+  # Optional: SYNC_K8S_RUNTIME_SECRET=true + Secrets APP_MONGO_URI, APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET apply Secret before Helm (see helm/app/values.deploy.yaml).
   HELM_INSTALL_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
   # Must match an existing ECR repository in your account (create in AWS if missing).
   # GitHub Variables treat whitespace-only values as truthy for || ; normalization happens in validate-aws / compute artifact metadata.
@@ -232,6 +233,14 @@ jobs:
           version: v3.14.4
       - name: Deploy image to blue clusters
         shell: bash
+        env:
+          SYNC_RUNTIME_SECRET: ${{ vars.SYNC_K8S_RUNTIME_SECRET }}
+          RUNTIME_SECRET_NAME: ${{ vars.RUNTIME_SECRET_NAME || 'api-runtime-env' }}
+          APP_MONGO_URI: ${{ secrets.APP_MONGO_URI }}
+          APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
+          APP_REDIS_URL: ${{ secrets.APP_REDIS_URL }}
+          APP_S3_BUCKET: ${{ secrets.APP_S3_BUCKET }}
+          APP_AWS_REGION: ${{ secrets.APP_AWS_REGION }}
         run: |
           set -euo pipefail
           export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
@@ -303,6 +312,9 @@ jobs:
             echo "Pre-Helm: $(kubectl config current-context)"
             aws sts get-caller-identity
             kubectl get ns --request-timeout=45s
+            # shellcheck source=.github/scripts/sync-runtime-secret.sh
+            source "${GITHUB_WORKSPACE}/.github/scripts/sync-runtime-secret.sh"
+            sync_runtime_secret
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
@@ -372,6 +384,14 @@ jobs:
           version: v3.14.4
       - name: Deploy image to green clusters with rollback
         shell: bash
+        env:
+          SYNC_RUNTIME_SECRET: ${{ vars.SYNC_K8S_RUNTIME_SECRET }}
+          RUNTIME_SECRET_NAME: ${{ vars.RUNTIME_SECRET_NAME || 'api-runtime-env' }}
+          APP_MONGO_URI: ${{ secrets.APP_MONGO_URI }}
+          APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
+          APP_REDIS_URL: ${{ secrets.APP_REDIS_URL }}
+          APP_S3_BUCKET: ${{ secrets.APP_S3_BUCKET }}
+          APP_AWS_REGION: ${{ secrets.APP_AWS_REGION }}
         run: |
           set -euo pipefail
           export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
@@ -456,6 +476,9 @@ jobs:
             echo "Pre-Helm: $(kubectl config current-context)"
             aws sts get-caller-identity
             kubectl get ns --request-timeout=45s
+            # shellcheck source=.github/scripts/sync-runtime-secret.sh
+            source "${GITHUB_WORKSPACE}/.github/scripts/sync-runtime-secret.sh"
+            sync_runtime_secret
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
