@@ -3,7 +3,8 @@
 # =============================================================================
 # Before deploy:
 #   1) Repo variable SYNC_K8S_RUNTIME_SECRET=true (CI applies Secret before helm upgrade).
-#   2) GitHub Secrets: APP_MONGO_URI, APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET
+#   2) GitHub Secrets: APP_MONGO_URI (required - pod exits if unset in production),
+#      APP_SESSION_SECRET, APP_REDIS_URL, APP_S3_BUCKET
 #      Optional: APP_AWS_REGION (else workflow AWS_REGION + extraEnv below set region).
 #   3) Terraform IAM: IRSA role for S3; annotate the pod ServiceAccount (see bottom).
 #
