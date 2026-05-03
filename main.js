@@ -76,6 +76,19 @@ app.use(express.static(publicDir));
 
 const PORT = Number(process.env.PORT) || 3000;
 
+if (
+  process.env.NODE_ENV === 'production' &&
+  !String(process.env.MONGO_URI || '').trim() &&
+  String(process.env.SKIP_REQUIRE_MONGO_URI || '').toLowerCase() !== 'true'
+) {
+  console.error(
+    '[startup] MONGO_URI is unset — Helm/envFrom Secret missing or HELM_VALUES_FILE not wired.\n' +
+      'Fix: GitHub vars HELM_VALUES_FILE=helm/app/values.deploy.yaml, SYNC_K8S_RUNTIME_SECRET=true,\n' +
+      'GitHub Secrets APP_MONGO_URI (etc.). Escape hatch (only if deliberate): SKIP_REQUIRE_MONGO_URI=true.'
+  );
+  process.exit(1);
+}
+
 const allowInMemoryFallback =
   String(process.env.ALLOW_IN_MEMORY_FALLBACK || 'true').toLowerCase() !== 'false';
 
@@ -214,8 +227,20 @@ function assertMongoUriLooksValid(uri) {
  * @param {string} mongoUri
  */
 async function connectMongoWithRetries(mongoUri) {
-  const maxAttempts = Number(process.env.MONGO_CONNECT_RETRIES) || 10;
-  const delayMs = Number(process.env.MONGO_CONNECT_RETRY_DELAY_MS) || 4000;
+  let maxAttempts = Number(process.env.MONGO_CONNECT_RETRIES) || 10;
+  let delayMs = Number(process.env.MONGO_CONNECT_RETRY_DELAY_MS) || 4000;
+  let selectionMs = Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 45000;
+
+  /** Typical mistake when Secret/envFrom is missing: long retries against localhost inside the pod. */
+  const isLocalMongoUri =
+    /^mongodb:\/\/localhost\b|^mongodb:\/\/127\.0\.0\.1\b|^mongodb:\/\/\[::1\]\b/i.test(
+      mongoUri.trim()
+    );
+  if (process.env.NODE_ENV === 'production' && isLocalMongoUri) {
+    maxAttempts = Math.min(maxAttempts, 4);
+    delayMs = Math.min(delayMs, 2500);
+    selectionMs = Math.min(selectionMs, 5000);
+  }
 
   assertMongoUriLooksValid(mongoUri);
 
@@ -225,7 +250,8 @@ async function connectMongoWithRetries(mongoUri) {
       if (mongoose.connection.readyState !== 0) {
         await mongoose.disconnect();
       }
-      await mongoose.connect(mongoUri, mongooseConnectOptions(mongoUri));
+      const opts = { ...mongooseConnectOptions(mongoUri), serverSelectionTimeoutMS: selectionMs };
+      await mongoose.connect(mongoUri, opts);
       try {
         await mongoose.connection.db.admin().command({ ping: 1 });
       } catch (pingErr) {
