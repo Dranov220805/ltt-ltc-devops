@@ -142,6 +142,9 @@ serviceMonitor:
 uploadsPersistence:
   enabled: false
   existingClaim: ""
+  # When set (and existingClaim is empty), the chart creates a PVC with this exact name.
+  # Use a new name when migrating storage class or accessMode; PVC spec is immutable after bind.
+  claimName: ""
   storageClass: ""
   accessMode: ReadWriteOnce
   size: 20Gi
