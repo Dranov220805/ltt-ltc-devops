@@ -31,8 +31,12 @@
 # Shared uploads volume across replicas. Provisioned by Terraform:
 # modules/efs (filesystem + mount targets) + aws-efs-csi-driver addon + StorageClass efs-sc
 # in modules/k8s-addons. Size is a nominal PVC field; EFS itself is elastic.
+#
+# claimName must differ from any existing gp2/RWO PVC (e.g. api-app-uploads): Kubernetes
+# forbids patching accessMode/storageClass on a bound claim. After cutover, delete the old PVC if unused.
 uploadsPersistence:
   enabled: true
+  claimName: api-app-uploads-efs
   storageClass: efs-sc
   accessMode: ReadWriteMany
   size: 30Gi

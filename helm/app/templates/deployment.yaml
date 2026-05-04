@@ -77,7 +77,7 @@ spec:
       volumes:
         - name: uploads-data
           persistentVolumeClaim:
-            claimName: {{ default (printf "%s-uploads" (include "app.fullname" .)) .Values.uploadsPersistence.existingClaim }}
+            claimName: {{ if .Values.uploadsPersistence.existingClaim }}{{ .Values.uploadsPersistence.existingClaim }}{{ else }}{{ .Values.uploadsPersistence.claimName | default (printf "%s-uploads" (include "app.fullname" .)) }}{{ end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
