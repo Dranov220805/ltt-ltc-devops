@@ -30,10 +30,35 @@
 
 uploadsPersistence:
   enabled: true
-  storageClass: gp3
+  storageClass: gp2
   accessMode: ReadWriteOnce
   size: 30Gi
   mountPath: /app/public/uploads
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # Restrict app host edge entry points to Cloudflare IPv4 ranges.
+    alb.ingress.kubernetes.io/inbound-cidrs: 173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22
+  hosts:
+    - host: devops.ltc.io.vn
+      paths:
+        - path: /
+          pathType: Prefix
+
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 15s
+  scrapeTimeout: 10s
+  path: /metrics
+  labels:
+    release: kube-prometheus-stack
 
 envFrom:
   - secretRef:
