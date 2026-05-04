@@ -45,9 +45,9 @@ uploadsPersistence:
 ingress:
   enabled: true
   className: alb
-  # HTTP-only at ALB origin: Cloudflare proxy provides public TLS at the edge.
-  # To enable origin HTTPS later, set alb.ingress.kubernetes.io/certificate-arn
-  # via CI variable ALB_CERTIFICATE_ARN and switch listen-ports back to 80,443.
+  # Default HTTP-only at ALB origin. CI automatically enables origin HTTPS
+  # when repo variable ALB_CERTIFICATE_ARN is set (adds certificate-arn,
+  # listen-ports 80/443, and ssl-redirect 443 via --set after this values file).
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip

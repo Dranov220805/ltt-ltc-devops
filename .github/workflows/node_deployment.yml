@@ -332,9 +332,6 @@ jobs:
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             CMD+=(--set-string uploadsPersistence.storageClass="${UPLOADS_STORAGE_CLASS}")
             CMD+=(--set-string ingress.hosts[0].host="${APP_INGRESS_HOST}")
-            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
-              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
-            fi
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
             fi
@@ -342,6 +339,11 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
+            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80},{"HTTPS":443}]')
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/ssl-redirect"="443")
+            fi
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
@@ -513,9 +515,6 @@ jobs:
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             CMD+=(--set-string uploadsPersistence.storageClass="${UPLOADS_STORAGE_CLASS}")
             CMD+=(--set-string ingress.hosts[0].host="${APP_INGRESS_HOST}")
-            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
-              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
-            fi
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
             fi
@@ -523,6 +522,11 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
+            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80},{"HTTPS":443}]')
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/ssl-redirect"="443")
+            fi
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
