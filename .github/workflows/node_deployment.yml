@@ -306,6 +306,22 @@ jobs:
             kubectl get ns --request-timeout=45s || true
             exit 1
           }
+          resolve_alb_cert_arn() {
+            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
+              echo "${ALB_CERTIFICATE_ARN}"
+              return 0
+            fi
+            local arn=""
+            local candidates
+            candidates="$(aws acm list-certificates --region "${AWS_REGION}" --certificate-statuses ISSUED --query 'CertificateSummaryList[].CertificateArn' --output text 2>/dev/null || true)"
+            for c in ${candidates}; do
+              if aws acm describe-certificate --region "${AWS_REGION}" --certificate-arn "${c}" --query "contains(Certificate.SubjectAlternativeNames, '${APP_INGRESS_HOST}')" --output text 2>/dev/null | grep -qi "^true$"; then
+                arn="${c}"
+                break
+              fi
+            done
+            echo "${arn}"
+          }
           TMO="${HELM_TIMEOUT:-20m}"
           IFS=',' read -r -a CLUSTERS <<< "${BLUE_CLUSTERS}"
           WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
@@ -339,10 +355,14 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
-            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
-              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
+            RESOLVED_ALB_CERTIFICATE_ARN="$(resolve_alb_cert_arn)"
+            if [ -n "${RESOLVED_ALB_CERTIFICATE_ARN}" ]; then
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${RESOLVED_ALB_CERTIFICATE_ARN}")
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80}\,{"HTTPS":443}]')
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/ssl-redirect"="443")
+              echo "Using ALB certificate ARN: ${RESOLVED_ALB_CERTIFICATE_ARN}"
+            else
+              echo "No issued ACM certificate found for ${APP_INGRESS_HOST}; deploying without ALB TLS annotations."
             fi
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
@@ -476,6 +496,22 @@ jobs:
             kubectl get ns --request-timeout=45s || true
             exit 1
           }
+          resolve_alb_cert_arn() {
+            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
+              echo "${ALB_CERTIFICATE_ARN}"
+              return 0
+            fi
+            local arn=""
+            local candidates
+            candidates="$(aws acm list-certificates --region "${AWS_REGION}" --certificate-statuses ISSUED --query 'CertificateSummaryList[].CertificateArn' --output text 2>/dev/null || true)"
+            for c in ${candidates}; do
+              if aws acm describe-certificate --region "${AWS_REGION}" --certificate-arn "${c}" --query "contains(Certificate.SubjectAlternativeNames, '${APP_INGRESS_HOST}')" --output text 2>/dev/null | grep -qi "^true$"; then
+                arn="${c}"
+                break
+              fi
+            done
+            echo "${arn}"
+          }
           TMO="${HELM_TIMEOUT:-20m}"
           IFS=',' read -r -a CLUSTERS <<< "${GREEN_CLUSTERS}"
           WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
@@ -522,10 +558,14 @@ jobs:
               CMD+=(-f "${VALUES_FILE}")
             fi
             CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
-            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
-              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
+            RESOLVED_ALB_CERTIFICATE_ARN="$(resolve_alb_cert_arn)"
+            if [ -n "${RESOLVED_ALB_CERTIFICATE_ARN}" ]; then
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${RESOLVED_ALB_CERTIFICATE_ARN}")
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80}\,{"HTTPS":443}]')
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/ssl-redirect"="443")
+              echo "Using ALB certificate ARN: ${RESOLVED_ALB_CERTIFICATE_ARN}"
+            else
+              echo "No issued ACM certificate found for ${APP_INGRESS_HOST}; deploying without ALB TLS annotations."
             fi
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
