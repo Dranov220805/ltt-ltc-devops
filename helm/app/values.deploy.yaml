@@ -28,25 +28,30 @@
 # Or enable CI: SYNC_K8S_RUNTIME_SECRET=true + GitHub Secrets APP_* (see node_deployment.yml).
 # =============================================================================
 
+# Shared uploads volume across replicas. Provisioned by Terraform:
+# modules/efs (filesystem + mount targets) + aws-efs-csi-driver addon + StorageClass efs-sc
+# in modules/k8s-addons. Size is a nominal PVC field; EFS itself is elastic.
 uploadsPersistence:
   enabled: true
-  storageClass: gp2
-  accessMode: ReadWriteOnce
+  storageClass: efs-sc
+  accessMode: ReadWriteMany
   size: 30Gi
   mountPath: /app/public/uploads
 
 ingress:
   enabled: true
   className: alb
+  # HTTP-only at ALB origin: Cloudflare proxy provides public TLS at the edge.
+  # To enable origin HTTPS later, set alb.ingress.kubernetes.io/certificate-arn
+  # via CI variable ALB_CERTIFICATE_ARN and switch listen-ports back to 80,443.
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
     # Restrict app host edge entry points to Cloudflare IPv4 ranges.
     alb.ingress.kubernetes.io/inbound-cidrs: 173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22
   hosts:
-    - host: devops.ltc.io.vn
+    - host: www.devops-ltc.io.vn
       paths:
         - path: /
           pathType: Prefix

@@ -1,5 +1,5 @@
 # Default image is overridden by CI (--set-string image.repository / image.tag).
-replicaCount: 1
+replicaCount: 3
 
 image:
   repository: changeme.example.com/app
@@ -37,7 +37,7 @@ ingress:
   className: alb
   annotations: {}
   hosts:
-    - host: devops.ltc.io.vn
+    - host: www.devops-ltc.io.vn
       paths:
         - path: /
           pathType: Prefix
@@ -77,8 +77,8 @@ probes:
 # Horizontal Pod Autoscaler (metrics-server required on cluster)
 hpa:
   enabled: true
-  minReplicas: 1
-  maxReplicas: 3
+  minReplicas: 3
+  maxReplicas: 6
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 70
   behavior:
@@ -94,8 +94,23 @@ hpa:
         - type: Percent
           value: 25
           periodSeconds: 60
-  # Optional: also scale on memory (requires metrics-server resource metrics)
-  # targetMemoryUtilizationPercentage: 80
+
+# PodDisruptionBudget — keeps minAvailable pods Ready during voluntary disruption
+# (node drain, rolling update). Set replicaCount/HPA so minAvailable + 1 pods can run.
+pdb:
+  enabled: true
+  minAvailable: 2
+  # maxUnavailable: 1   # mutually exclusive with minAvailable
+
+# Spread replicas across nodes/zones so a single node failure removes at most one pod.
+# labelSelector is auto-injected from chart selectorLabels.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
 
 env:
   - name: NODE_ENV

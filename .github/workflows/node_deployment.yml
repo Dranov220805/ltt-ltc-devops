@@ -42,9 +42,11 @@ env:
   K8S_DEPLOYMENT_NAME: ${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}
   HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE != '' && vars.HELM_VALUES_FILE || 'helm/app/values.deploy.yaml' }}
   # uploads PVC class used by chart value uploadsPersistence.storageClass.
-  # Use gp2 by default for this EKS setup unless you created gp3 StorageClass.
-  UPLOADS_STORAGE_CLASS: ${{ vars.UPLOADS_STORAGE_CLASS || 'gp2' }}
-  APP_INGRESS_HOST: ${{ vars.APP_INGRESS_HOST || 'devops.ltc.io.vn' }}
+  # Default efs-sc — provisioned by Terraform (modules/efs + aws-efs-csi-driver addon)
+  # so multiple replicas can share the same volume (ReadWriteMany). Override to gp2/gp3
+  # only when running a single replica without the EFS stack.
+  UPLOADS_STORAGE_CLASS: ${{ vars.UPLOADS_STORAGE_CLASS || 'efs-sc' }}
+  APP_INGRESS_HOST: ${{ vars.APP_INGRESS_HOST || 'www.devops-ltc.io.vn' }}
   ALB_CERTIFICATE_ARN: ${{ vars.ALB_CERTIFICATE_ARN || '' }}
   # Optional: SYNC_K8S_RUNTIME_SECRET=true creates/updates runtime Secret before Helm.
   # For in-cluster data services, APP_MONGO_URI / APP_REDIS_URL may be omitted (workflow derives cluster DNS).
