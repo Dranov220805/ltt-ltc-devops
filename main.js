@@ -29,8 +29,17 @@ const productRoutes = require('./routes/productRoutes');
 const dataSource = require('./services/dataSource');
 const uiRoutes = require('./routes/uiRoutes');
 const runtimeInfo = require('./services/runtimeInfo');
+const client = require('prom-client');
 
 const app = express();
+const register = new client.Registry();
+client.collectDefaultMetrics({ register });
+const httpRequestsTotal = new client.Counter({
+  name: 'http_requests_total',
+  help: 'Total HTTP requests',
+  labelNames: ['method', 'route', 'status_code']
+});
+register.registerMetric(httpRequestsTotal);
 
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
@@ -38,6 +47,17 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    const route = (req.route && req.route.path) || req.path || 'unknown';
+    httpRequestsTotal.inc({
+      method: req.method,
+      route: String(route),
+      status_code: String(res.statusCode)
+    });
+  });
+  next();
+});
 
 /** Set true after dataSource.init completes — used by Kubernetes readiness probe */
 let appReady = false;
@@ -51,6 +71,15 @@ app.get('/ready', (req, res) => {
     return res.status(503).json({ status: 'starting' });
   }
   res.status(200).json({ status: 'ready' });
+});
+
+app.get('/metrics', async (req, res, next) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (err) {
+    next(err);
+  }
 });
 
 // view engine

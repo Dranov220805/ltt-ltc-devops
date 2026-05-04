@@ -44,6 +44,8 @@ env:
   # uploads PVC class used by chart value uploadsPersistence.storageClass.
   # Use gp2 by default for this EKS setup unless you created gp3 StorageClass.
   UPLOADS_STORAGE_CLASS: ${{ vars.UPLOADS_STORAGE_CLASS || 'gp2' }}
+  APP_INGRESS_HOST: ${{ vars.APP_INGRESS_HOST || 'devops.ltc.io.vn' }}
+  ALB_CERTIFICATE_ARN: ${{ vars.ALB_CERTIFICATE_ARN || '' }}
   # Optional: SYNC_K8S_RUNTIME_SECRET=true creates/updates runtime Secret before Helm.
   # For in-cluster data services, APP_MONGO_URI / APP_REDIS_URL may be omitted (workflow derives cluster DNS).
   HELM_INSTALL_TIMEOUT: ${{ vars.HELM_INSTALL_TIMEOUT || '20m' }}
@@ -325,6 +327,10 @@ jobs:
             sync_runtime_secret
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             CMD+=(--set-string uploadsPersistence.storageClass="${UPLOADS_STORAGE_CLASS}")
+            CMD+=(--set-string ingress.hosts[0].host="${APP_INGRESS_HOST}")
+            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
+            fi
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
             fi
@@ -334,6 +340,13 @@ jobs:
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
+            kubectl -n "${NS}" port-forward svc/"${RELEASE}-app" 18080:80 >/tmp/port-forward.log 2>&1 &
+            PF_PID=$!
+            sleep 5
+            curl -fsS "http://127.0.0.1:18080/health" >/dev/null
+            curl -fsS "http://127.0.0.1:18080/ready" >/dev/null
+            curl -fsS "http://127.0.0.1:18080/metrics" >/dev/null
+            kill "${PF_PID}" || true
           done
       - name: Blue deployment summary
         run: |
@@ -494,6 +507,10 @@ jobs:
             sync_runtime_secret
             CMD=(helm upgrade --install "${RELEASE}" "${CHART}" --namespace "${NS}" --create-namespace --atomic --wait --timeout "${TMO}" --set-string image.repository="${IMG_REPO}" --set-string image.tag="${IMG_TAG}" --set-string rollout.mode="${DEPLOYMENT_STRATEGY}")
             CMD+=(--set-string uploadsPersistence.storageClass="${UPLOADS_STORAGE_CLASS}")
+            CMD+=(--set-string ingress.hosts[0].host="${APP_INGRESS_HOST}")
+            if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
+            fi
             if [ "${DEPLOYMENT_STRATEGY}" = "canary" ]; then
               CMD+=(--set canary.enabled=true --set replicaCount=1 --set hpa.enabled=false --set-string rollout.strategy.maxSurge="100%" --set rollout.strategy.maxUnavailable=0)
             fi
@@ -503,6 +520,13 @@ jobs:
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
+            kubectl -n "${NS}" port-forward svc/"${RELEASE}-app" 18080:80 >/tmp/port-forward.log 2>&1 &
+            PF_PID=$!
+            sleep 5
+            curl -fsS "http://127.0.0.1:18080/health" >/dev/null
+            curl -fsS "http://127.0.0.1:18080/ready" >/dev/null
+            curl -fsS "http://127.0.0.1:18080/metrics" >/dev/null
+            kill "${PF_PID}" || true
             DEPLOYED="${DEPLOYED},${CLUSTER}"
           done
       - name: Green deployment summary

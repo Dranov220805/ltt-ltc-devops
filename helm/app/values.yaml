@@ -32,6 +32,17 @@ service:
   port: 80
   targetPort: 3000
 
+ingress:
+  enabled: false
+  className: alb
+  annotations: {}
+  hosts:
+    - host: devops.ltc.io.vn
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
 resources:
   requests:
     cpu: 100m
@@ -104,6 +115,14 @@ extraEnv: []
 #   - secretRef:
 #       name: api-runtime-env
 envFrom: []
+
+serviceMonitor:
+  enabled: false
+  namespace: monitoring
+  interval: 15s
+  scrapeTimeout: 10s
+  path: /metrics
+  labels: {}
 
 uploadsPersistence:
   enabled: false
