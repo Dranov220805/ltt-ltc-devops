@@ -46,6 +46,8 @@ env:
   # so multiple replicas can share the same volume (ReadWriteMany). Override to gp2/gp3
   # only when running a single replica without the EFS stack.
   UPLOADS_STORAGE_CLASS: ${{ vars.UPLOADS_STORAGE_CLASS || 'efs-sc' }}
+  # Must match values.deploy.yaml; passed after -f so CI always wins over a stale file on the branch.
+  UPLOADS_CLAIM_NAME: ${{ vars.UPLOADS_CLAIM_NAME || 'api-app-uploads-efs' }}
   APP_INGRESS_HOST: ${{ vars.APP_INGRESS_HOST || 'www.devops-ltc.io.vn' }}
   ALB_CERTIFICATE_ARN: ${{ vars.ALB_CERTIFICATE_ARN || '' }}
   # Optional: SYNC_K8S_RUNTIME_SECRET=true creates/updates runtime Secret before Helm.
@@ -304,7 +306,7 @@ jobs:
             kubectl get ns --request-timeout=45s || true
             exit 1
           }
-          TMO="${HELM_TIMEOUT:-5m}"
+          TMO="${HELM_TIMEOUT:-20m}"
           IFS=',' read -r -a CLUSTERS <<< "${BLUE_CLUSTERS}"
           WAVE_SIZE="${CLUSTER_WAVE_SIZE:-1}"
           if ! [[ "${WAVE_SIZE}" =~ ^[0-9]+$ ]] || [ "${WAVE_SIZE}" -lt 1 ]; then
@@ -339,6 +341,7 @@ jobs:
             if [ -n "${VALUES_FILE}" ] && [ -f "${VALUES_FILE}" ]; then
               CMD+=(-f "${VALUES_FILE}")
             fi
+            CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
@@ -519,6 +522,7 @@ jobs:
             if [ -n "${VALUES_FILE}" ] && [ -f "${VALUES_FILE}" ]; then
               CMD+=(-f "${VALUES_FILE}")
             fi
+            CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
             "${CMD[@]}"
             kubectl rollout status deployment/"${{ vars.K8S_DEPLOYMENT_NAME || 'api-app' }}" -n "${NS}" --timeout="${TMO}"
             kubectl get hpa -n "${NS}" -o wide || true
