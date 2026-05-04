@@ -341,7 +341,7 @@ jobs:
             CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
             if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
-              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80},{"HTTPS":443}]')
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80}\,{"HTTPS":443}]')
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/ssl-redirect"="443")
             fi
             "${CMD[@]}"
@@ -524,7 +524,7 @@ jobs:
             CMD+=(--set-string uploadsPersistence.claimName="${UPLOADS_CLAIM_NAME}")
             if [ -n "${ALB_CERTIFICATE_ARN}" ]; then
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/certificate-arn"="${ALB_CERTIFICATE_ARN}")
-              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80},{"HTTPS":443}]')
+              CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/listen-ports"='[{"HTTP":80}\,{"HTTPS":443}]')
               CMD+=(--set-string ingress.annotations."alb\.ingress\.kubernetes\.io/ssl-redirect"="443")
             fi
             "${CMD[@]}"
